@@ -77,6 +77,8 @@ enum llm_arch {
     LLM_ARCH_PLM,
     LLM_ARCH_BAILINGMOE,
     LLM_ARCH_UNKNOWN,
+    LLM_ARCH_BGEVL_TEXT,
+    LLM_ARCH_BGEVL_VISION
 };
 
 enum llm_kv {
