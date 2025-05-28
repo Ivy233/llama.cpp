@@ -1,11 +1,14 @@
 import json
 import torch
+import os
+import sys
 import argparse
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
-from transformers import AutoTokenizer, CLIPModel
+from typing import Optional, Tuple
+from transformers import AutoTokenizer
 
-# 假设这些是从llama.cpp的gguf-py导入的
+if "NO_LOCAL_GGUF" not in os.environ:
+    sys.path.insert(1, str(Path(__file__).parent.parent.parent / "gguf-py"))
 import gguf
 
 CLIP_TEXT_ARCH = "clip-text"
@@ -58,7 +61,6 @@ class TensorNameMap:
             gguf.constants.MODEL_TENSOR.TOKEN_EMBD: ("text_model.embeddings.token_embedding",),
             gguf.constants.MODEL_TENSOR.POS_EMBD: ("text_model.embeddings.position_embedding",),
             gguf.constants.MODEL_TENSOR.OUTPUT_NORM: ("text_model.final_layer_norm",),
-            "text_projection": ("text_projection",),
         }
 
         # 添加视觉模型全局映射
@@ -66,9 +68,8 @@ class TensorNameMap:
             gguf.constants.MODEL_TENSOR.TOKEN_EMBD: ("vision_model.embeddings.patch_embedding",),
             gguf.constants.MODEL_TENSOR.POS_EMBD: ("vision_model.embeddings.position_embedding",),
             gguf.constants.MODEL_TENSOR.OUTPUT_NORM: ("vision_model.post_layernorm",),
-            "vision_model.pre_layrnorm": ("vision_model.pre_layrnorm",),
+            gguf.constants.MODEL_TENSOR.INPUT_NORM: ("vision_model.pre_layrnorm",),
             gguf.constants.MODEL_TENSOR.CLS: ("vision_model.embeddings.class_embedding",),
-            "visual_projection": ("visual_projection",),
         }
 
         for tensor_type, patterns in self.text_global_mappings.items():
@@ -82,7 +83,7 @@ class TensorNameMap:
         # 如果提供了模型键映射文件，加载它以获取更准确的映射
         self.model_keys = None
         if model_keys_path is not None and model_keys_path.exists():
-            with open(model_keys_path, 'r') as f:
+            with open(model_keys_path, "r") as f:
                 self.model_keys = json.load(f)
 
     def get_mapping(self, key: str) -> Optional[Tuple[str, gguf.constants.MODEL_TENSOR]]:
@@ -115,8 +116,14 @@ class TensorNameMap:
 
 
 class BGEClipConverter:
-    def __init__(self, model_dir: Path, output_text_path: Path, output_vision_path: Path,
-                 ftype: int, model_keys_path: Optional[Path] = None):
+    def __init__(
+        self,
+        model_dir: Path,
+        output_text_path: Path,
+        output_vision_path: Path,
+        ftype: int,
+        model_keys_path: Optional[Path] = None,
+    ):
         self.model_dir = model_dir
         self.output_text_path = output_text_path
         self.output_vision_path = output_vision_path
@@ -178,7 +185,7 @@ class BGEClipConverter:
         self.text_gguf_writer.add_head_count(self.text_n_heads)
         self.text_gguf_writer.add_vocab_size(self.text_vocab_size)
         self.text_gguf_writer.add_file_type(self.ftype)
-        self.text_gguf_writer.add_uint32("projection_dim", self.projection_dim)
+        # self.text_gguf_writer.add_uint32("projection_dim", self.projection_dim)
         self.text_gguf_writer.add_eos_token_id(self.config["text_config"]["eos_token_id"])
         self.text_gguf_writer.add_bos_token_id(self.config["text_config"]["bos_token_id"])
         self.text_gguf_writer.add_logit_scale(self.config["logit_scale_init_value"])
@@ -195,7 +202,7 @@ class BGEClipConverter:
 
         self.vision_gguf_writer.add_uint32("image_size", self.vision_image_size)
         self.vision_gguf_writer.add_uint32("patch_size", self.vision_patch_size)
-        self.vision_gguf_writer.add_uint32("projection_dim", self.projection_dim)
+        # self.vision_gguf_writer.add_uint32("projection_dim", self.projection_dim)
 
     def convert_tensor_name(self, name: str) -> Tuple[Optional[str], str]:
         mapping = self.tensor_map.get_mapping(name)
@@ -303,7 +310,7 @@ if __name__ == "__main__":
         output_text_path=Path(args.text_outfile),
         output_vision_path=Path(args.vision_outfile),
         ftype=args.ftype,
-        model_keys_path=model_keys_path
+        model_keys_path=model_keys_path,
     )
     converter.convert()
     print(f"Successfully converted text model to {args.text_outfile}, vision model to {args.vision_outfile}")

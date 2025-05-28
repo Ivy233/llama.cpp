@@ -360,6 +360,7 @@ class MODEL_TENSOR(IntEnum):
     TOKEN_EMBD_NORM      = auto()
     TOKEN_TYPES          = auto()
     POS_EMBD             = auto()
+    INPUT_NORM           = auto()
     OUTPUT               = auto()
     OUTPUT_NORM          = auto()
     ROPE_FREQS           = auto()
@@ -641,6 +642,7 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.TOKEN_TYPES:               "token_types",
     MODEL_TENSOR.POS_EMBD:                  "position_embd",
     MODEL_TENSOR.OUTPUT_NORM:               "output_norm",
+    MODEL_TENSOR.INPUT_NORM:                "input_norm",
     MODEL_TENSOR.OUTPUT:                    "output",
     MODEL_TENSOR.ROPE_FREQS:                "rope_freqs",
     MODEL_TENSOR.ROPE_FACTORS_LONG:         "rope_factors_long",

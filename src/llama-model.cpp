@@ -6159,7 +6159,7 @@ struct llm_build_cliptext : public llm_graph_context {
 
             cur = build_attn(inp_attn, gf,
                     model.layers[il].wo, model.layers[il].bo,
-                    Qcur, Kcur, Vcur, nullptr, 1.0f/sqrtf(float(n_embd)), il);
+                    Qcur, Kcur, Vcur, nullptr, nullptr, 1.0f/sqrtf(float(n_embd)), il);
             cb(cur, "kqv_out", il);
 
             // if (il == n_layer - 1 && pooling_type == LLAMA_POOLING_TYPE_NONE) {

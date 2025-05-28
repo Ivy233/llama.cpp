@@ -2251,7 +2251,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & value) {
             params.image.emplace_back(value);
         }
-    ).set_examples({LLAMA_EXAMPLE_MTMD}));
+    ).set_examples({LLAMA_EXAMPLE_MTMD, LLAMA_EXAMPLE_EMBEDDING}));
     if (llama_supports_rpc()) {
         add_opt(common_arg(
             {"--rpc"}, "SERVERS",

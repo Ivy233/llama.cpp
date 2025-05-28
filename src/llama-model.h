@@ -335,6 +335,8 @@ struct llama_model {
     struct ggml_tensor * tok_norm   = nullptr;
     struct ggml_tensor * tok_norm_b = nullptr;
 
+    struct ggml_tensor * input_norm      = nullptr;
+    struct ggml_tensor * input_norm_b    = nullptr;
     struct ggml_tensor * output_norm     = nullptr;
     struct ggml_tensor * output_norm_b   = nullptr;
     struct ggml_tensor * output          = nullptr;
