@@ -12,7 +12,7 @@ if "NO_LOCAL_GGUF" not in os.environ:
 import gguf
 
 CLIP_TEXT_ARCH = "clip-text"
-CLIP_VISION_ARCH = "clip.vision"
+CLIP_VISION_ARCH = "clip-vision"
 
 class TensorNameMap:
     def __init__(self, n_text_blocks: int, n_vision_blocks: int, model_keys_path: Optional[Path] = None):
@@ -65,7 +65,7 @@ class TensorNameMap:
 
         # 添加视觉模型全局映射
         self.vision_global_mappings = {
-            gguf.constants.MODEL_TENSOR.TOKEN_EMBD: ("vision_model.embeddings.patch_embedding",),
+            gguf.constants.MODEL_TENSOR.V_ENC_EMBD_PATCH: ("vision_model.embeddings.patch_embedding",),
             gguf.constants.MODEL_TENSOR.POS_EMBD: ("vision_model.embeddings.position_embedding",),
             gguf.constants.MODEL_TENSOR.OUTPUT_NORM: ("vision_model.post_layernorm",),
             gguf.constants.MODEL_TENSOR.INPUT_NORM: ("vision_model.pre_layrnorm",),
@@ -199,6 +199,9 @@ class BGEClipConverter:
         self.vision_gguf_writer.add_layer_norm_eps(self.vision_layer_norm_eps)
         self.vision_gguf_writer.add_file_type(self.ftype)
         self.vision_gguf_writer.add_logit_scale(self.config["logit_scale_init_value"])
+        self.vision_gguf_writer.add_context_length(int(self.vision_image_size / self.vision_patch_size) + 1)
+        self.vision_gguf_writer.add_causal_attention(False)
+        self.vision_gguf_writer.add_tokenizer_model("no_vocab")
 
         self.vision_gguf_writer.add_uint32("image_size", self.vision_image_size)
         self.vision_gguf_writer.add_uint32("patch_size", self.vision_patch_size)

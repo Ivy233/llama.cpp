@@ -894,7 +894,7 @@ int llama_context::decode(llama_batch & inp_batch) {
     GGML_ASSERT((!batch.token && batch.embd) || (batch.token && !batch.embd)); // NOLINT
 
     // TODO: move the validation to the llama_batch_allocr
-    if (batch.token) {
+    if (batch.token && model.vocab.n_token_types() > 0) {
         for (int64_t i = 0; i < n_tokens_all; ++i) {
             if (batch.token[i] < 0 || (uint32_t) batch.token[i] >= model.vocab.n_tokens()) {
                 LLAMA_LOG_ERROR("%s: invalid token[%" PRId64 "] = %d\n", __func__, i, batch.token[i]);

@@ -929,10 +929,11 @@ ggml_tensor * llm_graph_context::build_inp_out_ids() const {
 
 ggml_tensor * llm_graph_context::build_inp_mean() const {
     auto inp = std::make_unique<llm_graph_input_mean>(cparams);
+    ggml_tensor * inp_tensor = res->t_embd;
 
     auto & cur = inp->mean;
 
-    cur = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_tokens, n_tokens);
+    cur = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, inp_tensor->ne[1], inp_tensor->ne[1]);
     ggml_set_input(cur);
 
     res->add_input(std::move(inp));

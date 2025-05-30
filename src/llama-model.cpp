@@ -708,6 +708,15 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 ml.get_key(LLM_KV_POOLING_TYPE,               hparams.pooling_type, false);
                 type = LLM_TYPE_137M;
             } break;
+        case LLM_ARCH_BGEVL_VISION:
+            {
+                ml.get_key(LLM_KV_ATTENTION_LAYERNORM_EPS,    hparams.f_norm_eps);
+                ml.get_key(LLM_KV_ATTENTION_CAUSAL,           hparams.causal_attn);
+                ml.get_key(LLM_KV_POOLING_TYPE,               hparams.pooling_type, false);
+                ml.get_key("image_size",                      hparams.n_image_size);
+                ml.get_key("patch_size",                      hparams.n_image_patch_size);
+                type = LLM_TYPE_137M;
+            } break;
         case LLM_ARCH_JINA_BERT_V2:
             {
                 ml.get_key(LLM_KV_ATTENTION_LAYERNORM_EPS,    hparams.f_norm_eps);
@@ -2262,13 +2271,15 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                 } break;
             case LLM_ARCH_BGEVL_VISION:
                 {
-                    pos_embd      = create_tensor(tn(LLM_TENSOR_POS_EMBD,    "weight"), {n_embd, n_ctx_train}, 0);
-                    cls           = create_tensor(tn(LLM_TENSOR_CLS),                   {n_embd}, 0);
-                    output_norm   = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_embd}, 0);
-                    output_norm_b = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "bias"),   {n_embd}, 0);
-                    // TODO: 
-                    // patch_embedding
-                    // pre_layrnorm
+                    // 3: R/G/B 257: 0-256
+                    int num_patches = hparams.n_image_size / hparams.n_image_patch_size;
+                    tok_embd      = create_tensor(tn(LLM_TENSOR_V_PATCH_EMBD, "weight"), {hparams.n_image_patch_size, hparams.n_image_patch_size, 3, n_embd}, 0);
+                    pos_embd      = create_tensor(tn(LLM_TENSOR_POS_EMBD,     "weight"), {n_embd, num_patches * num_patches + 1}, 0);
+                    cls           = create_tensor(tn(LLM_TENSOR_CLS),                    {n_embd}, 0);
+                    output_norm   = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM,  "weight"), {n_embd}, 0);
+                    output_norm_b = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM,  "bias"),   {n_embd}, 0);
+                    input_norm    = create_tensor(tn(LLM_TENSOR_INPUT_NORM,   "weight"), {n_embd}, 0);
+                    input_norm_b  = create_tensor(tn(LLM_TENSOR_INPUT_NORM,   "bias"),   {n_embd}, 0);
 
                     for (int i = 0; i < n_layer; ++i) {
                         auto & layer = layers[i];
@@ -2283,7 +2294,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                         layer.bv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "bias", i),   {n_embd}, 0);
 
                         layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd, n_embd}, 0);
-                        layer.bo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "bias", i),   {n_embd, n_embd}, 0);
+                        layer.bo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "bias", i),   {n_embd}, 0);
 
                         layer.attn_norm     = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "weight", i),   {n_embd}, 0);
                         layer.attn_norm_b   = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "bias", i),     {n_embd}, 0);
@@ -6162,13 +6173,6 @@ struct llm_build_cliptext : public llm_graph_context {
                     Qcur, Kcur, Vcur, nullptr, nullptr, 1.0f/sqrtf(float(n_embd)), il);
             cb(cur, "kqv_out", il);
 
-            // if (il == n_layer - 1 && pooling_type == LLAMA_POOLING_TYPE_NONE) {
-            //     // skip computing output for unused tokens
-            //     ggml_tensor * inp_out_ids = build_inp_out_ids();
-            //     cur  = ggml_get_rows(ctx0,  cur, inp_out_ids);
-            //     inpL = ggml_get_rows(ctx0, inpL, inp_out_ids);
-            // }
-
             cur = ggml_add(ctx0, cur, inpL);
 
             // norm2
@@ -6197,6 +6201,125 @@ struct llm_build_cliptext : public llm_graph_context {
 
         ggml_build_forward_expand(gf, cur);
 
+    }
+};
+
+struct llm_build_clipvision : public llm_graph_context {
+    llm_build_clipvision(const llama_model & model, const llm_graph_params & params, ggml_cgraph * gf): llm_graph_context(params) {
+        const int64_t n_embd_head = hparams.n_embd_head_v;
+        int num_position = (params.hparams.n_image_size / params.hparams.n_image_patch_size) * (params.hparams.n_image_size / params.hparams.n_image_patch_size) + 1;
+        // Correct way to get 'inp' according to other llm_graph_context subclasses
+        auto inp = std::make_unique<llm_graph_input_embd>();
+        inp->embd = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, hparams.n_image_size, hparams.n_image_size, 3);
+        ggml_set_input(inp->embd);
+        ggml_tensor * patch_embeds = ggml_conv_2d(ctx0, model.tok_embd, inp->embd, 
+                                                 params.hparams.n_image_patch_size, params.hparams.n_image_patch_size, 0, 0, 1, 1);
+        patch_embeds = ggml_reshape_3d(ctx0, patch_embeds, 
+                                      patch_embeds->ne[0] * patch_embeds->ne[1], patch_embeds->ne[2], inp->embd->ne[3]);
+        patch_embeds = ggml_permute(ctx0, patch_embeds, 1, 0, 2, 3);
+        
+        // class embedding
+        ggml_tensor * class_embeds = ggml_repeat(ctx0, model.cls, 
+                                               ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, model.cls->ne[0], patch_embeds->ne[2]));
+        
+        // concatenate class and patch embeddings
+        ggml_tensor * inpL = ggml_concat(ctx0, class_embeds, patch_embeds, 1);
+        // add position embeddings
+        // ggml_tensor * pos_ids = build_inp_pos();
+
+        auto pos_ids_ptr = std::make_unique<llm_graph_input_pos>(n_pos_per_embd());
+        auto &pos_ids = pos_ids_ptr->pos;
+        pos_ids = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, inpL->ne[1]);
+        ggml_set_input(pos_ids);
+        res->add_input(std::move(pos_ids_ptr));
+
+        cb(inpL, "vision_inp", -1);
+        ggml_tensor * pos_embd = ggml_get_rows(ctx0, model.pos_embd, ggml_view_1d(ctx0, pos_ids, std::min(inpL->ne[1], pos_ids->ne[0]), 0));
+        cb(pos_embd, "vision_embd", -1);
+        inpL = ggml_add(ctx0, inpL, pos_embd);
+   
+        
+        // apply layer norm
+        inpL = build_norm(inpL, model.input_norm, model.input_norm_b, LLM_NORM, -1);
+
+        auto * inp_attn = build_attn_inp_no_cache();
+        inp_attn->kq_mask = inp_attn->kq_mask_cnv = nullptr;
+        ggml_tensor * cur = nullptr;
+        // iterate layers
+        for (int il = 0; il < n_layer; ++il) {
+            cur = inpL;
+            // norm1
+            cur = build_norm(cur, ggml_repeat(ctx0, model.layers[il].attn_norm, cur), ggml_repeat(ctx0, model.layers[il].attn_norm_b, cur), LLM_NORM, il);
+
+            // self-attention
+            {
+
+                struct ggml_tensor * Q =
+                    ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].bq, cur), ggml_mul_mat(ctx0, model.layers[il].wq, cur));
+
+                Q = ggml_scale_inplace(ctx0, Q, 1.0f / sqrt((float)n_embd_head));
+                Q = ggml_reshape_4d(ctx0, Q, n_embd_head, n_head, num_position, 1);
+                Q = ggml_cont(ctx0, ggml_permute(ctx0, Q, 0, 2, 1, 3));
+                // Q = ggml_reshape_3d(ctx0, Q, d_head, num_positions, n_head * batch_size);
+                cb(Q, "Qcur", il);
+
+                struct ggml_tensor * K =
+                    ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].bk, cur), ggml_mul_mat(ctx0, model.layers[il].wk, cur));
+
+                K = ggml_reshape_4d(ctx0, K, n_embd_head, n_head, num_position, 1);
+                K = ggml_cont(ctx0, ggml_permute(ctx0, K, 0, 2, 1, 3));
+                // K = ggml_reshape_3d(ctx0, K, d_head, num_positions, n_head * batch_size);
+                cb(K, "Kcur", il);
+
+                struct ggml_tensor * V =
+                    ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].bv, cur), ggml_mul_mat(ctx0, model.layers[il].wv, cur));
+
+                V = ggml_reshape_4d(ctx0, V, n_embd_head, n_head, num_position, 1);
+                V = ggml_cont(ctx0, ggml_permute(ctx0, V, 1, 2, 0, 3));
+                V = ggml_reshape_3d(ctx0, V, num_position, n_embd_head, n_head);
+                cb(V, "Vcur", il);
+
+                struct ggml_tensor * KQ = ggml_mul_mat(ctx0, K, Q);
+                KQ = ggml_soft_max_inplace(ctx0, KQ);
+                struct ggml_tensor * KQV = ggml_mul_mat(ctx0, V, KQ);
+                KQV = ggml_reshape_4d(ctx0, KQV, n_embd_head, num_position, n_head, 1);
+                KQV = ggml_cont(ctx0, ggml_permute(ctx0, KQV, 0, 2, 1, 3));
+
+                cur = ggml_cpy(ctx0, KQV, ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, n_embd_head * n_head, num_position, 1));
+            }
+            cur = ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].bo, cur), ggml_mul_mat(ctx0, model.layers[il].wo, cur));
+
+            cb(cur, "kqv_out", il);
+
+            cur = ggml_add(ctx0, cur, inpL);
+
+            // norm2
+            inpL = cur;
+            cur = build_norm(cur, model.layers[il].attn_norm_2, model.layers[il].attn_norm_2_b, LLM_NORM, il);
+            // MLP
+            ggml_tensor * ffn_inp = cur;
+            cb(ffn_inp, "ffn_inp", il);
+            // printf("ffn_up: %s %ld %ld %ld %ld %d\n", model.layers[il].ffn_up->name, model.layers[il].ffn_up->ne[0], model.layers[il].ffn_up->ne[1], model.layers[il].ffn_up->ne[2], model.layers[il].ffn_up->ne[3], model.layers[il].ffn_up->type);
+            cur = build_ffn(cur,
+                model.layers[il].ffn_up,   model.layers[il].ffn_up_b,   NULL,
+                NULL,                      NULL,                        NULL,
+                model.layers[il].ffn_down, model.layers[il].ffn_down_b, NULL,
+                NULL,
+                LLM_FFN_GELU, LLM_FFN_SEQ, il);
+            // printf("ffn_down: %s %ld %ld %ld %ld %d\n", model.layers[il].ffn_down->name, model.layers[il].ffn_down->ne[0], model.layers[il].ffn_down->ne[1], model.layers[il].ffn_down->ne[2], model.layers[il].ffn_down->ne[3], model.layers[il].ffn_down->type);
+            cb(cur, "ffn_out", il);
+            // add
+            cur = ggml_add(ctx0, cur, ffn_inp);
+            // input for next layer
+            inpL = cur;
+        }
+        cur = build_norm(inpL, ggml_repeat(ctx0, model.output_norm, cur), ggml_repeat(ctx0, model.output_norm_b, cur), LLM_NORM, -1);
+        // printf("output_norm: %s %ld %ld %ld %ld %d\n", model.output_norm->name, model.output_norm->ne[0], model.output_norm->ne[1], model.output_norm->ne[2], model.output_norm->ne[3], model.output_norm->type);
+
+        cb(cur, "result_embd", -1);
+        res->t_embd = cur;
+
+        ggml_build_forward_expand(gf, cur);
     }
 };
 
@@ -13342,6 +13465,8 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
         case LLM_ARCH_NOMIC_BERT:
         case LLM_ARCH_NOMIC_BERT_MOE:
         case LLM_ARCH_WAVTOKENIZER_DEC:
+        case LLM_ARCH_BGEVL_TEXT:
+        case LLM_ARCH_BGEVL_VISION:
             {
                 res = nullptr;
             } break;
@@ -13408,7 +13533,6 @@ llm_graph_result_ptr llama_model::build_graph(
                    ggml_cgraph * gf,
                 llm_graph_type   type) const {
     std::unique_ptr<llm_graph_context> llm;
-
     switch (arch) {
         case LLM_ARCH_LLAMA:
         case LLM_ARCH_MINICPM:
@@ -13453,6 +13577,10 @@ llm_graph_result_ptr llama_model::build_graph(
         case LLM_ARCH_BGEVL_TEXT:
             {
                 llm = std::make_unique<llm_build_cliptext>(*this, params, gf);
+            } break;
+        case LLM_ARCH_BGEVL_VISION:
+            {
+                llm = std::make_unique<llm_build_clipvision>(*this, params, gf);
             } break;
         case LLM_ARCH_BLOOM:
             {

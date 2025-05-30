@@ -2,9 +2,16 @@
 #include "common.h"
 #include "log.h"
 #include "llama.h"
+#include "clip.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 #include <ctime>
 #include <algorithm>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <cmath>
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -70,6 +77,143 @@ static void batch_decode(llama_context * ctx, llama_batch & batch, float * outpu
     }
 }
 
+// Function to preprocess image for embedding
+llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int height, int channels)
+{
+    llama_batch batch = {};
+
+    if (!image_data || width <= 0 || height <= 0 || channels != 3) {
+        LOG_ERR("%s: Invalid input parameters\n", __func__);
+        return batch;
+    }
+
+    const int target_size = 224;
+    const int longer_side = std::max(width, height);
+    const float scale = std::min(
+        static_cast<float>(target_size) / width,
+        static_cast<float>(target_size) / height
+    );
+    std::vector<float> processed(target_size * target_size * channels);
+    std::vector<float> temp(longer_side * longer_side * channels);
+     
+    if (width != height) {
+        const uint8_t bc[3] = {122, 116, 104}; // background color in RGB from LLaVA (this is the mean rgb color * 255)
+
+        // fill with background color
+        for (size_t i = 0; i < temp.size(); i++) {
+            temp[i] = bc[i % 3];
+        }
+
+        // copy from the input image
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                const int i = 3 * (y * width + x);
+                const int j = 3 * (y * longer_side + x);
+                for (int c = 0; c < channels; c++) {
+                    temp[j+c] = image_data[i+c];
+                }
+            }
+        }
+    } else {
+        for(int i = 0; i < width * height * channels; i++){
+            temp[i] = image_data[i];
+        }
+    }
+
+    const int nx3 = int(longer_side * scale + 0.5f);
+    const int ny3 = int(longer_side * scale + 0.5f);
+    const float m3[] = {0.48145466f, 0.4578275f, 0.40821073f};
+    const float s3[] = {0.26862954f, 0.26130258f, 0.27577711f};
+
+    for (int y = 0; y < ny3; y++) {
+        for (int x = 0; x < nx3; x++) {
+            for (int c = 0; c < 3; c++) {
+                // linear interpolation
+                const float sx = (x + 0.5f) * scale - 0.5f;
+                const float sy = (y + 0.5f) * scale - 0.5f;
+
+                const int x0 = std::max(0, (int)std::floor(sx));
+                const int y0 = std::max(0, (int)std::floor(sy));
+
+                const int x1 = std::min(x0 + 1, width - 1);
+                const int y1 = std::min(y0 + 1, height - 1);
+
+                const float dx = sx - x0;
+                const float dy = sy - y0;
+
+                const int j00 = 3 * (y0 * width + x0) + c;
+                const int j01 = 3 * (y0 * width + x1) + c;
+                const int j10 = 3 * (y1 * width + x0) + c;
+                const int j11 = 3 * (y1 * width + x1) + c;
+
+                const float v00 = temp[j00];
+                const float v01 = temp[j01];
+                const float v10 = temp[j10];
+                const float v11 = temp[j11];
+
+                const float v0 = v00 * (1.0f - dx) + v01 * dx;
+                const float v1 = v10 * (1.0f - dx) + v11 * dx;
+
+                const float v = v0 * (1.0f - dy) + v1 * dy;
+
+                const uint8_t v2 = std::min(std::max(std::round(v), 0.0f), 255.0f);
+
+                const int i = 3 * (y * nx3 + x) + c;
+                processed[i] = ((float(v2) / 255.0f) - m3[c]) / s3[c];
+            }
+        }
+    }
+
+    const float mean[] = {0.485f, 0.456f, 0.406f};
+    const float std[] = {0.229f, 0.224f, 0.225f};
+
+    for (size_t i = 0; i < processed.size(); ++i) {
+        const int c = i % 3;
+        processed[i] = (processed[i]/255.0f - mean[c]) / std[c];
+    }
+
+    batch = llama_batch_init(target_size, target_size, target_size);
+
+    batch.n_tokens = target_size;
+    for (int i = 0; i < target_size; ++i) {
+        for (int j = 0; j < target_size; ++j) {
+            batch.embd[i * target_size + j] = processed[i * target_size + j];
+            batch.seq_id[i][j] = 0;
+        }
+        batch.n_seq_id[i] = 1;
+        batch.pos[i] = i;
+    }
+
+    return batch;
+}
+
+// Function to process image and get embeddings
+static bool process_image_embedding(llama_context * ctx, const std::string & image_path, float * output, int n_embd, int embd_norm) {
+    // Load image using stb_image
+    int width = 0, height = 0, channels = 0;
+    
+    LOG_INF("%s: loading image from %s\n", __func__, image_path.c_str());
+    
+    unsigned char * rgb_data = stbi_load(image_path.c_str(), &width, &height, &channels, 3);
+    if (!rgb_data) {
+        LOG_ERR("%s: failed to load image from %s\n", __func__, image_path.c_str());
+        return false;
+    }
+    
+    // Process the image to get embeddings
+    // const struct llama_model * model = llama_get_model(ctx);
+    
+    // Create image tensor and process it
+    struct llama_batch llm_batch = llama_image_preprocess(rgb_data, width, height, channels);
+    // Get image embeddings
+    batch_decode(ctx, llm_batch, output, 1, n_embd, embd_norm);
+    // Copy and normalize embeddings
+    
+    // Clean up
+    stbi_image_free(rgb_data);
+    return true;
+}
+
 int main(int argc, char ** argv) {
     common_params params;
 
@@ -127,95 +271,126 @@ int main(int argc, char ** argv) {
         LOG_INF("%s\n", common_params_get_system_info(params).c_str());
     }
 
-    // split the prompt into lines
-    std::vector<std::string> prompts = split_lines(params.prompt, params.embd_sep);
+    // Check if input is an image
+    bool is_image = !params.image.empty();
+    int n_embd_count = 0;
 
-    // max batch size
-    const uint64_t n_batch = params.n_batch;
-
-    // tokenize the prompts and trim
-    std::vector<std::vector<int32_t>> inputs;
-    for (const auto & prompt : prompts) {
-        auto inp = common_tokenize(ctx, prompt, true, true);
-        if (inp.size() > n_batch) {
-            LOG_ERR("%s: number of tokens in input line (%lld) exceeds batch size (%lld), increase batch size and re-run\n",
-                    __func__, (long long int) inp.size(), (long long int) n_batch);
+    // Allocate output for embeddings
+    const int n_embd = llama_model_n_embd(model);
+    std::vector<float> embeddings;
+    float * emb = nullptr;
+    if (is_image) {
+        // Process image
+        embeddings.resize(n_embd, 0);
+        emb = embeddings.data();
+        params.n_ctx = 257;  // TODO
+        if (!process_image_embedding(ctx, params.image[0], emb, n_embd, params.embd_normalize)) {
+            LOG_ERR("%s: failed to process image embedding\n", __func__);
+            llama_backend_free();
             return 1;
         }
-        inputs.push_back(inp);
-    }
-
-    // check if the last token is SEP
-    // it should be automatically added by the tokenizer when 'tokenizer.ggml.add_eos_token' is set to 'true'
-    for (auto & inp : inputs) {
-        if (inp.empty() || inp.back() != llama_vocab_sep(vocab)) {
-            LOG_WRN("%s: last token in the prompt is not SEP\n", __func__);
-            LOG_WRN("%s: 'tokenizer.ggml.add_eos_token' should be set to 'true' in the GGUF header\n", __func__);
-        }
-    }
-
-    // tokenization stats
-    if (params.verbose_prompt) {
-        for (int i = 0; i < (int) inputs.size(); i++) {
-            LOG_INF("%s: prompt %d: '%s'\n", __func__, i, prompts[i].c_str());
-            LOG_INF("%s: number of tokens in prompt = %zu\n", __func__, inputs[i].size());
-            for (int j = 0; j < (int) inputs[i].size(); j++) {
-                LOG("%6d -> '%s'\n", inputs[i][j], common_token_to_piece(ctx, inputs[i][j]).c_str());
-            }
-            LOG("\n\n");
-        }
-    }
-
-    // initialize batch
-    const int n_prompts = prompts.size();
-    struct llama_batch batch = llama_batch_init(n_batch, 0, 1);
-
-    // count number of embeddings
-    int n_embd_count = 0;
-    if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
-        for (int k = 0; k < n_prompts; k++) {
-            n_embd_count += inputs[k].size();
-        }
     } else {
-        n_embd_count = n_prompts;
-    }
+        // split the prompt into lines
+        std::vector<std::string> prompts = split_lines(params.prompt, params.embd_sep);
 
-    // allocate output
-    const int n_embd = llama_model_n_embd(model);
-    std::vector<float> embeddings(n_embd_count * n_embd, 0);
-    float * emb = embeddings.data();
+        // max batch size
+        const uint64_t n_batch = params.n_batch;
 
-    // break into batches
-    int e = 0; // number of embeddings already stored
-    int s = 0; // number of prompts in current batch
-    for (int k = 0; k < n_prompts; k++) {
-        // clamp to n_batch tokens
-        auto & inp = inputs[k];
-
-        const uint64_t n_toks = inp.size();
-
-        // encode if at capacity
-        if (batch.n_tokens + n_toks > n_batch) {
-            float * out = emb + e * n_embd;
-            batch_decode(ctx, batch, out, s, n_embd, params.embd_normalize);
-            e += pooling_type == LLAMA_POOLING_TYPE_NONE ? batch.n_tokens : s;
-            s = 0;
-            common_batch_clear(batch);
+        // tokenize the prompts and trim
+        std::vector<std::vector<int32_t>> inputs;
+        for (const auto & prompt : prompts) {
+            auto inp = common_tokenize(ctx, prompt, true, true);
+            if (inp.size() > n_batch) {
+                LOG_ERR("%s: number of tokens in input line (%lld) exceeds batch size (%lld), increase batch size and re-run\n",
+                        __func__, (long long int) inp.size(), (long long int) n_batch);
+                return 1;
+            }
+            inputs.push_back(inp);
         }
 
-        // add to batch
-        batch_add_seq(batch, inp, s);
-        s += 1;
+        // check if the last token is SEP
+        // it should be automatically added by the tokenizer when 'tokenizer.ggml.add_eos_token' is set to 'true'
+        for (auto & inp : inputs) {
+            if (inp.empty() || inp.back() != llama_vocab_sep(vocab)) {
+                LOG_WRN("%s: last token in the prompt is not SEP\n", __func__);
+                LOG_WRN("%s: 'tokenizer.ggml.add_eos_token' should be set to 'true' in the GGUF header\n", __func__);
+            }
+        }
+
+        // tokenization stats
+        if (params.verbose_prompt) {
+            for (int i = 0; i < (int) inputs.size(); i++) {
+                LOG_INF("%s: prompt %d: '%s'\n", __func__, i, prompts[i].c_str());
+                LOG_INF("%s: number of tokens in prompt = %zu\n", __func__, inputs[i].size());
+                for (int j = 0; j < (int) inputs[i].size(); j++) {
+                    LOG("%6d -> '%s'\n", inputs[i][j], common_token_to_piece(ctx, inputs[i][j]).c_str());
+                }
+                LOG("\n\n");
+            }
+        }
+
+        // initialize batch
+        const int n_prompts = prompts.size();
+        struct llama_batch batch = llama_batch_init(n_batch, 0, 1);
+
+        // count number of embeddings
+        if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
+            for (int k = 0; k < n_prompts; k++) {
+                n_embd_count += inputs[k].size();
+            }
+        } else {
+            n_embd_count = n_prompts;
+        }
+
+        // allocate output
+        embeddings.resize(n_embd_count * n_embd, 0);
+        emb = embeddings.data();
+
+        // break into batches
+        int e = 0; // number of embeddings already stored
+        int s = 0; // number of prompts in current batch
+        for (int k = 0; k < n_prompts; k++) {
+            // clamp to n_batch tokens
+            auto & inp = inputs[k];
+
+            const uint64_t n_toks = inp.size();
+
+            // encode if at capacity
+            if (batch.n_tokens + n_toks > n_batch) {
+                float * out = emb + e * n_embd;
+                batch_decode(ctx, batch, out, s, n_embd, params.embd_normalize);
+                e += pooling_type == LLAMA_POOLING_TYPE_NONE ? batch.n_tokens : s;
+                s = 0;
+                common_batch_clear(batch);
+            }
+
+            // add to batch
+            batch_add_seq(batch, inp, s);
+            s += 1;
+        }
+
+        // final batch
+        float * out = emb + e * n_embd;
+        batch_decode(ctx, batch, out, s, n_embd, params.embd_normalize);
+        // clean up batch
+        llama_batch_free(batch);
     }
 
-    // final batch
-    float * out = emb + e * n_embd;
-    batch_decode(ctx, batch, out, s, n_embd, params.embd_normalize);
-
+    // Output embeddings
     if (params.embd_out.empty()) {
         LOG("\n");
 
-        if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
+        if (is_image) {
+            LOG("image embedding: ");
+            for (int i = 0; i < n_embd; i++) {
+                if (params.embd_normalize == 0) {
+                    LOG("%6.0f ", emb[i]);
+                } else {
+                    LOG("%9.6f ", emb[i]);
+                }
+            }
+            LOG("\n");
+        } else if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
             for (int j = 0; j < n_embd_count; j++) {
                 LOG("embedding %d: ", j);
                 for (int i = 0; i < std::min(3, n_embd); i++) {
@@ -242,6 +417,7 @@ int main(int argc, char ** argv) {
             }
         } else {
             // print the first part of the embeddings or for a single prompt, the full embedding
+            int n_prompts = is_image ? 1 : n_embd_count;
             for (int j = 0; j < n_prompts; j++) {
                 LOG("embedding %d: ", j);
                 for (int i = 0; i < (n_prompts > 1 ? std::min(16, n_embd) : n_embd); i++) {
@@ -259,7 +435,7 @@ int main(int argc, char ** argv) {
                 LOG("\n");
                 LOG("cosine similarity matrix:\n\n");
                 for (int i = 0; i < n_prompts; i++) {
-                    LOG("%6.6s ", prompts[i].c_str());
+                    LOG("%6.6s ", "");  // Placeholder for image or text label
                 }
                 LOG("\n");
                 for (int i = 0; i < n_prompts; i++) {
@@ -267,7 +443,7 @@ int main(int argc, char ** argv) {
                         float sim = common_embd_similarity_cos(emb + i * n_embd, emb + j * n_embd, n_embd);
                         LOG("%6.2f ", sim);
                     }
-                    LOG("%1.10s", prompts[i].c_str());
+                    LOG("%1.10s", "");  // Placeholder for image or text label
                     LOG("\n");
                 }
             }
@@ -292,7 +468,7 @@ int main(int argc, char ** argv) {
         }
         LOG(notArray ? "\n  ]" : "]\n");
 
-        if (params.embd_out == "json+" && n_prompts > 1) {
+        if (params.embd_out == "json+" && n_embd_count > 1) {
             LOG(",\n  \"cosineSimilarity\": [\n");
             for (int i = 0;;) { // at least two iteration (n_embd_count > 1)
                 LOG("    [");
@@ -316,7 +492,6 @@ int main(int argc, char ** argv) {
     llama_perf_context_print(ctx);
 
     // clean up
-    llama_batch_free(batch);
     llama_backend_free();
 
     return 0;
