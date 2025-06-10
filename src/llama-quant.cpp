@@ -783,6 +783,11 @@ static void llama_model_quantize_impl(const std::string & fname_inp, const std::
         // do not quantize relative position bias (T5)
         quantize &= name.find("attn_rel_b.weight") == std::string::npos;
 
+        // do not quantize v_patch_embd
+        quantize &= name.find("v.patch_embd.weight") == std::string::npos;
+        printf("quantize: %d, name: %s\n", quantize, name.c_str());
+
+
         ggml_type new_type;
         void * new_data;
         size_t new_size;

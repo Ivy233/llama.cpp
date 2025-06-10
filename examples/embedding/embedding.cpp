@@ -78,7 +78,7 @@ static void batch_decode(llama_context * ctx, llama_batch & batch, float * outpu
 }
 
 // Function to preprocess image for embedding
-llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int height, int channels)
+llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int height, int channels, int target_size)
 {
     llama_batch batch = {};
 
@@ -87,7 +87,7 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
         return batch;
     }
 
-    const int target_size = 224;
+    // const int target_size = 224;
     const int longer_side = std::max(width, height);
     const float scale = std::min(
         static_cast<float>(target_size) / width,
@@ -201,10 +201,8 @@ static bool process_image_embedding(llama_context * ctx, const std::string & ima
     }
     
     // Process the image to get embeddings
-    // const struct llama_model * model = llama_get_model(ctx);
-    
     // Create image tensor and process it
-    struct llama_batch llm_batch = llama_image_preprocess(rgb_data, width, height, channels);
+    struct llama_batch llm_batch = llama_image_preprocess(rgb_data, width, height, channels, 224);
     // Get image embeddings
     batch_decode(ctx, llm_batch, output, 1, n_embd, embd_norm);
     // Copy and normalize embeddings
@@ -283,7 +281,6 @@ int main(int argc, char ** argv) {
         // Process image
         embeddings.resize(n_embd, 0);
         emb = embeddings.data();
-        params.n_ctx = 257;  // TODO
         if (!process_image_embedding(ctx, params.image[0], emb, n_embd, params.embd_normalize)) {
             LOG_ERR("%s: failed to process image embedding\n", __func__);
             llama_backend_free();
