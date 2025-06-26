@@ -61,11 +61,13 @@ class TensorNameMap:
             gguf.constants.MODEL_TENSOR.TOKEN_EMBD: ("text_model.embeddings.token_embedding",),
             gguf.constants.MODEL_TENSOR.POS_EMBD: ("text_model.embeddings.position_embedding",),
             gguf.constants.MODEL_TENSOR.OUTPUT_NORM: ("text_model.final_layer_norm",),
+            gguf.constants.MODEL_TENSOR.T_PROJECTION: ("text_projection",),
         }
 
         # 添加视觉模型全局映射
         self.vision_global_mappings = {
             gguf.constants.MODEL_TENSOR.V_ENC_EMBD_PATCH: ("vision_model.embeddings.patch_embedding",),
+            gguf.constants.MODEL_TENSOR.V_PROJECTION: ("visual_projection",),
             gguf.constants.MODEL_TENSOR.POS_EMBD: ("vision_model.embeddings.position_embedding",),
             gguf.constants.MODEL_TENSOR.OUTPUT_NORM: ("vision_model.post_layernorm",),
             gguf.constants.MODEL_TENSOR.INPUT_NORM: ("vision_model.pre_layrnorm",),
@@ -185,10 +187,11 @@ class BGEClipConverter:
         self.text_gguf_writer.add_head_count(self.text_n_heads)
         self.text_gguf_writer.add_vocab_size(self.text_vocab_size)
         self.text_gguf_writer.add_file_type(self.ftype)
-        # self.text_gguf_writer.add_uint32("projection_dim", self.projection_dim)
+        self.text_gguf_writer.add_uint32("projection_dim", self.projection_dim)
         self.text_gguf_writer.add_eos_token_id(self.config["text_config"]["eos_token_id"])
         self.text_gguf_writer.add_bos_token_id(self.config["text_config"]["bos_token_id"])
         self.text_gguf_writer.add_logit_scale(self.config["logit_scale_init_value"])
+        # self.text_gguf_writer.add_key_value(f"{CLIP_TEXT_ARCH}.hidden_size", self.config["text_config"]["hidden_size"], gguf.GGUFValueType.UINT32)
 
         # 设置视觉模型参数
         # self.vision_gguf_writer.add_architecture()
@@ -202,10 +205,11 @@ class BGEClipConverter:
         self.vision_gguf_writer.add_context_length(int(self.vision_image_size / self.vision_patch_size) + 1)
         self.vision_gguf_writer.add_causal_attention(False)
         self.vision_gguf_writer.add_tokenizer_model("no_vocab")
+        self.vision_gguf_writer.add_uint32("projection_dim", self.projection_dim)
 
         self.vision_gguf_writer.add_uint32("image_size", self.vision_image_size)
         self.vision_gguf_writer.add_uint32("patch_size", self.vision_patch_size)
-        # self.vision_gguf_writer.add_uint32("projection_dim", self.projection_dim)
+        # self.vision_gguf_writer.add_key_value(f"{CLIP_VISION_ARCH}.hidden_size", self.config["vision_config"]["hidden_size"], gguf.GGUFValueType.UINT32)
 
     def convert_tensor_name(self, name: str) -> Tuple[Optional[str], str]:
         mapping = self.tensor_map.get_mapping(name)

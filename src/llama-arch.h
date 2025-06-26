@@ -368,6 +368,8 @@ enum llm_tensor {
     LLM_TENSOR_POS_NET_ATTN_V,
     LLM_TENSOR_POS_NET_ATTN_OUT,
     LLM_TENSOR_V_PATCH_EMBD,
+    LLM_TENSOR_T_PROJECTION,
+    LLM_TENSOR_V_PROJECTION,
 };
 
 enum llm_tensor_layer {

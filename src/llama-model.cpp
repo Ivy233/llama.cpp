@@ -2242,6 +2242,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                     pos_embd      = create_tensor(tn(LLM_TENSOR_POS_EMBD,    "weight"), {n_embd, n_ctx_train}, 0);
                     output_norm   = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_embd}, 0);
                     output_norm_b = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "bias"),   {n_embd}, 0);
+                    projection    = create_tensor(tn(LLM_TENSOR_T_PROJECTION, "weight"), {n_embd, 768}, 0);
 
                     for (int i = 0; i < n_layer; ++i) {
                         auto & layer = layers[i];
@@ -2280,6 +2281,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                     output_norm_b = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM,  "bias"),   {n_embd}, 0);
                     input_norm    = create_tensor(tn(LLM_TENSOR_INPUT_NORM,   "weight"), {n_embd}, 0);
                     input_norm_b  = create_tensor(tn(LLM_TENSOR_INPUT_NORM,   "bias"),   {n_embd}, 0);
+                    projection    = create_tensor(tn(LLM_TENSOR_V_PROJECTION, "weight"), {n_embd, 768}, 0);
 
                     for (int i = 0; i < n_layer; ++i) {
                         auto & layer = layers[i];
@@ -6152,7 +6154,7 @@ struct llm_build_cliptext : public llm_graph_context {
             ggml_tensor * cur = inpL;
             // norm1
             // [n_embd, k] * [n_embd, 1] cannot pass assert
-            // [n_embd, k] * repeat([n_embd, 1] => [n_embd, k]) yes 
+            // [n_embd, k] * repeat([n_embd, 1] => [n_embd, k]) yes
             // norm =>GGML_TYPE_F32
             cur = build_norm(cur, ggml_repeat(ctx0, model.layers[il].attn_norm, cur), ggml_repeat(ctx0, model.layers[il].attn_norm_b, cur), LLM_NORM, il);
 
@@ -6195,6 +6197,7 @@ struct llm_build_cliptext : public llm_graph_context {
         }
 
         cur = inpL;
+        // cur = ggml_mul_mat(ctx0, inpl);
 
         cb(cur, "result_embd", -1);
         res->t_embd = cur;
@@ -6210,18 +6213,19 @@ struct llm_build_clipvision : public llm_graph_context {
         int num_position = (params.hparams.n_image_size / params.hparams.n_image_patch_size) * (params.hparams.n_image_size / params.hparams.n_image_patch_size) + 1;
         // Correct way to get 'inp' according to other llm_graph_context subclasses
         auto inp = std::make_unique<llm_graph_input_embd>();
-        inp->embd = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, hparams.n_image_size, hparams.n_image_size, 3);
+        inp->embd = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, hparams.n_image_size * hparams.n_image_size, 1, 3);
         ggml_set_input(inp->embd);
-        ggml_tensor * patch_embeds = ggml_conv_2d(ctx0, model.tok_embd, inp->embd, 
+        inp->embd = ggml_reshape_3d(ctx0, inp->embd, hparams.n_image_size, hparams.n_image_size, 3);
+        ggml_tensor * patch_embeds = ggml_conv_2d(ctx0, model.tok_embd, inp->embd,
                                                  params.hparams.n_image_patch_size, params.hparams.n_image_patch_size, 0, 0, 1, 1);
-        patch_embeds = ggml_reshape_3d(ctx0, patch_embeds, 
+        patch_embeds = ggml_reshape_3d(ctx0, patch_embeds,
                                       patch_embeds->ne[0] * patch_embeds->ne[1], patch_embeds->ne[2], inp->embd->ne[3]);
         patch_embeds = ggml_permute(ctx0, patch_embeds, 1, 0, 2, 3);
-        
+
         // class embedding
-        ggml_tensor * class_embeds = ggml_repeat(ctx0, model.cls, 
+        ggml_tensor * class_embeds = ggml_repeat(ctx0, model.cls,
                                                ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, model.cls->ne[0], patch_embeds->ne[2]));
-        
+
         // concatenate class and patch embeddings
         ggml_tensor * inpL = ggml_concat(ctx0, class_embeds, patch_embeds, 1);
         // add position embeddings
@@ -6237,8 +6241,7 @@ struct llm_build_clipvision : public llm_graph_context {
         ggml_tensor * pos_embd = ggml_get_rows(ctx0, model.pos_embd, ggml_view_1d(ctx0, pos_ids, std::min(inpL->ne[1], pos_ids->ne[0]), 0));
         cb(pos_embd, "vision_embd", -1);
         inpL = ggml_add(ctx0, inpL, pos_embd);
-   
-        
+
         // apply layer norm
         inpL = build_norm(inpL, model.input_norm, model.input_norm_b, LLM_NORM, -1);
 
@@ -6313,10 +6316,31 @@ struct llm_build_clipvision : public llm_graph_context {
             // input for next layer
             inpL = cur;
         }
-        cur = build_norm(inpL, ggml_repeat(ctx0, model.output_norm, cur), ggml_repeat(ctx0, model.output_norm_b, cur), LLM_NORM, -1);
-        // printf("output_norm: %s %ld %ld %ld %ld %d\n", model.output_norm->name, model.output_norm->ne[0], model.output_norm->ne[1], model.output_norm->ne[2], model.output_norm->ne[3], model.output_norm->type);
+        cur = ggml_view_2d(ctx0, inpL, inpL->ne[0], 1, inpL->ne[0], 0);
+        ggml_tensor* test = model.projection;
+        if(test->data) {
+            // printf("test: %f %f %f %f %f\n", ((float*)(test->data))[0], ((float*)(test->data))[1], ((float*)(test->data))[2], ((float*)(test->data))[3], ((float*)(test->data))[4]);
+	        for(int i = 0; i < 5; i++) {
+                float val = ggml_fp16_to_fp32(((ggml_fp16_t*)(test->data))[i]);
+                printf("test[%d]: %f\n", i, val);
+            }
+        }
+        else printf("test is None!!!!!!!!!!!");
+        cur = build_norm(cur, model.output_norm, model.output_norm_b, LLM_NORM, -1);
+        // cur = build_norm(inpL, ggml_repeat(ctx0, model.output_norm, cur), ggml_repeat(ctx0, model.output_norm_b, cur), LLM_NORM, -1);
+        cb(cur, "before_projection", -1);
+        // printf("22222222222222222============\noutput_norm: %s %ld %ld %ld %ld %d\n", model.output_norm->name, model.output_norm->ne[0], model.output_norm->ne[1], model.output_norm->ne[2], model.output_norm->ne[3], model.output_norm->type);
 
+        // printf("output_norm_b: %s %ld %ld %ld %ld %d\n", model.output_norm_b->name, model.output_norm_b->ne[0], model.output_norm_b->ne[1], model.output_norm->ne[2], model.output_norm->ne[3], model.output_norm_b->type);
+        // printf("cur: %s %ld %ld %ld %ld %d\n", cur->name, cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3], cur->type);
+        // printf("inpL: %s %ld %ld %ld %ld %d\n", inpL->name, inpL->ne[0], inpL->ne[1], inpL->ne[2], inpL->ne[3], inpL->type);
+        cur = ggml_mul_mat(ctx0, model.projection, cur);
+        // printf("11111111111111111============\ncur: %s %ld %ld %ld %ld %d\n", cur->name, cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3], cur->type);
         cb(cur, "result_embd", -1);
+        if (cur->data)
+	        for(int i = 0; i < 5; i++) {
+                printf("cur [%d]: %f\n", i, ((float *)cur->data)[i]);
+        }
         res->t_embd = cur;
 
         ggml_build_forward_expand(gf, cur);

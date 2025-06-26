@@ -342,6 +342,7 @@ struct llama_model {
     struct ggml_tensor * output          = nullptr;
     struct ggml_tensor * output_b        = nullptr;
     struct ggml_tensor * output_norm_enc = nullptr;
+    struct ggml_tensor * projection      = nullptr;
 
     // classifier
     struct ggml_tensor * cls       = nullptr;

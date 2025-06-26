@@ -95,7 +95,7 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
     );
     std::vector<float> processed(target_size * target_size * channels);
     std::vector<float> temp(longer_side * longer_side * channels);
-     
+
     if (width != height) {
         const uint8_t bc[3] = {122, 116, 104}; // background color in RGB from LLaVA (this is the mean rgb color * 255)
 
@@ -164,25 +164,26 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
         }
     }
 
-    const float mean[] = {0.485f, 0.456f, 0.406f};
-    const float std[] = {0.229f, 0.224f, 0.225f};
+    // const float mean[] = {0.485f, 0.456f, 0.406f};
+    // const float std[] = {0.229f, 0.224f, 0.225f};
 
-    for (size_t i = 0; i < processed.size(); ++i) {
-        const int c = i % 3;
-        processed[i] = (processed[i]/255.0f - mean[c]) / std[c];
+    // for (size_t i = 0; i < processed.size(); ++i) {
+    //     const int c = i % 3;
+    //     processed[i] = (processed[i]/255.0f - mean[c]) / std[c];
+    // }
+
+    batch = llama_batch_init(1, target_size * target_size * 3, 1);
+    // batch = llama_batch_init(target_size, target_size, target_size);
+
+    batch.n_tokens = 1;
+    for (int i = 0; i < target_size * target_size * 3; ++i) {
+        batch.embd[i] = processed[i];
     }
-
-    batch = llama_batch_init(target_size, target_size, target_size);
-
-    batch.n_tokens = target_size;
-    for (int i = 0; i < target_size; ++i) {
-        for (int j = 0; j < target_size; ++j) {
-            batch.embd[i * target_size + j] = processed[i * target_size + j];
-            batch.seq_id[i][j] = 0;
-        }
-        batch.n_seq_id[i] = 1;
-        batch.pos[i] = i;
+    for (int i = 0; i < 1; i++) {
+        batch.seq_id[i] = 0;
     }
+    batch.n_seq_id[0] = 1;
+    batch.pos[0] = 0;
 
     return batch;
 }
@@ -191,22 +192,22 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
 static bool process_image_embedding(llama_context * ctx, const std::string & image_path, float * output, int n_embd, int embd_norm) {
     // Load image using stb_image
     int width = 0, height = 0, channels = 0;
-    
+
     LOG_INF("%s: loading image from %s\n", __func__, image_path.c_str());
-    
+
     unsigned char * rgb_data = stbi_load(image_path.c_str(), &width, &height, &channels, 3);
     if (!rgb_data) {
         LOG_ERR("%s: failed to load image from %s\n", __func__, image_path.c_str());
         return false;
     }
-    
+
     // Process the image to get embeddings
     // Create image tensor and process it
     struct llama_batch llm_batch = llama_image_preprocess(rgb_data, width, height, channels, 224);
     // Get image embeddings
     batch_decode(ctx, llm_batch, output, 1, n_embd, embd_norm);
     // Copy and normalize embeddings
-    
+
     // Clean up
     stbi_image_free(rgb_data);
     return true;
