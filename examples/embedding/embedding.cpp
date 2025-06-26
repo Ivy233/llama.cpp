@@ -164,16 +164,7 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
         }
     }
 
-    // const float mean[] = {0.485f, 0.456f, 0.406f};
-    // const float std[] = {0.229f, 0.224f, 0.225f};
-
-    // for (size_t i = 0; i < processed.size(); ++i) {
-    //     const int c = i % 3;
-    //     processed[i] = (processed[i]/255.0f - mean[c]) / std[c];
-    // }
-
     batch = llama_batch_init(1, target_size * target_size * 3, 1);
-    // batch = llama_batch_init(target_size, target_size, target_size);
 
     batch.n_tokens = 1;
     for (int i = 0; i < target_size * target_size * 3; ++i) {

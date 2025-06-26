@@ -6211,15 +6211,20 @@ struct llm_build_clipvision : public llm_graph_context {
     llm_build_clipvision(const llama_model & model, const llm_graph_params & params, ggml_cgraph * gf): llm_graph_context(params) {
         const int64_t n_embd_head = hparams.n_embd_head_v;
         int num_position = (params.hparams.n_image_size / params.hparams.n_image_patch_size) * (params.hparams.n_image_size / params.hparams.n_image_patch_size) + 1;
-        // Correct way to get 'inp' according to other llm_graph_context subclasses
+
         auto inp = std::make_unique<llm_graph_input_embd>();
-        inp->embd = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, hparams.n_image_size * hparams.n_image_size, 1, 3);
+        inp->embd = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, hparams.n_image_size, hparams.n_image_size, 3);
         ggml_set_input(inp->embd);
-        inp->embd = ggml_reshape_3d(ctx0, inp->embd, hparams.n_image_size, hparams.n_image_size, 3);
-        ggml_tensor * patch_embeds = ggml_conv_2d(ctx0, model.tok_embd, inp->embd,
-                                                 params.hparams.n_image_patch_size, params.hparams.n_image_patch_size, 0, 0, 1, 1);
+        ggml_tensor * input_embeds = inp->embd;
+        res->add_input(std::move(inp));
+
+        ggml_tensor * patch_embeds = ggml_conv_2d(ctx0, model.tok_embd, input_embeds, params.hparams.n_image_patch_size,
+                                                  params.hparams.n_image_patch_size, 0, 0, 1, 1);
+
+        // patch_embeds的shape: [patch_w, patch_h, embed_dim]
+        // 需要reshape为 [patch_w * patch_h, embed_dim, 1]
         patch_embeds = ggml_reshape_3d(ctx0, patch_embeds,
-                                      patch_embeds->ne[0] * patch_embeds->ne[1], patch_embeds->ne[2], inp->embd->ne[3]);
+                                      patch_embeds->ne[0] * patch_embeds->ne[1], patch_embeds->ne[2], input_embeds->ne[3]);
         patch_embeds = ggml_permute(ctx0, patch_embeds, 1, 0, 2, 3);
 
         // class embedding
@@ -6317,15 +6322,6 @@ struct llm_build_clipvision : public llm_graph_context {
             inpL = cur;
         }
         cur = ggml_view_2d(ctx0, inpL, inpL->ne[0], 1, inpL->ne[0], 0);
-        ggml_tensor* test = model.projection;
-        if(test->data) {
-            // printf("test: %f %f %f %f %f\n", ((float*)(test->data))[0], ((float*)(test->data))[1], ((float*)(test->data))[2], ((float*)(test->data))[3], ((float*)(test->data))[4]);
-	        for(int i = 0; i < 5; i++) {
-                float val = ggml_fp16_to_fp32(((ggml_fp16_t*)(test->data))[i]);
-                printf("test[%d]: %f\n", i, val);
-            }
-        }
-        else printf("test is None!!!!!!!!!!!");
         cur = build_norm(cur, model.output_norm, model.output_norm_b, LLM_NORM, -1);
         // cur = build_norm(inpL, ggml_repeat(ctx0, model.output_norm, cur), ggml_repeat(ctx0, model.output_norm_b, cur), LLM_NORM, -1);
         cb(cur, "before_projection", -1);
@@ -6334,13 +6330,9 @@ struct llm_build_clipvision : public llm_graph_context {
         // printf("output_norm_b: %s %ld %ld %ld %ld %d\n", model.output_norm_b->name, model.output_norm_b->ne[0], model.output_norm_b->ne[1], model.output_norm->ne[2], model.output_norm->ne[3], model.output_norm_b->type);
         // printf("cur: %s %ld %ld %ld %ld %d\n", cur->name, cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3], cur->type);
         // printf("inpL: %s %ld %ld %ld %ld %d\n", inpL->name, inpL->ne[0], inpL->ne[1], inpL->ne[2], inpL->ne[3], inpL->type);
-        cur = ggml_mul_mat(ctx0, model.projection, cur);
+        // cur = ggml_mul_mat(ctx0, model.projection, cur);
         // printf("11111111111111111============\ncur: %s %ld %ld %ld %ld %d\n", cur->name, cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3], cur->type);
         cb(cur, "result_embd", -1);
-        if (cur->data)
-	        for(int i = 0; i < 5; i++) {
-                printf("cur [%d]: %f\n", i, ((float *)cur->data)[i]);
-        }
         res->t_embd = cur;
 
         ggml_build_forward_expand(gf, cur);
