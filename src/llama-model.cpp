@@ -706,6 +706,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 ml.get_key(LLM_KV_ATTENTION_LAYERNORM_EPS,    hparams.f_norm_eps);
                 ml.get_key(LLM_KV_ATTENTION_CAUSAL,           hparams.causal_attn);
                 ml.get_key(LLM_KV_POOLING_TYPE,               hparams.pooling_type, false);
+                ml.get_key("clip-text.hidden_size",           hparams.n_hidden_size);
                 type = LLM_TYPE_137M;
             } break;
         case LLM_ARCH_BGEVL_VISION:
@@ -715,6 +716,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 ml.get_key(LLM_KV_POOLING_TYPE,               hparams.pooling_type, false);
                 ml.get_key("image_size",                      hparams.n_image_size);
                 ml.get_key("patch_size",                      hparams.n_image_patch_size);
+                ml.get_key("clip-vision.hidden_size",         hparams.n_hidden_size);
                 type = LLM_TYPE_137M;
             } break;
         case LLM_ARCH_JINA_BERT_V2:
@@ -2238,75 +2240,77 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                 } break;
             case LLM_ARCH_BGEVL_TEXT:
                 {
-                    tok_embd      = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD,  "weight"), {n_embd, n_vocab}, 0);
-                    pos_embd      = create_tensor(tn(LLM_TENSOR_POS_EMBD,    "weight"), {n_embd, n_ctx_train}, 0);
-                    output_norm   = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_embd}, 0);
-                    output_norm_b = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "bias"),   {n_embd}, 0);
-                    projection    = create_tensor(tn(LLM_TENSOR_T_PROJECTION, "weight"), {n_embd, 768}, 0);
+                    int n_hidden_size = hparams.n_hidden_size;
+                    tok_embd      = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD,  "weight"), {n_hidden_size, n_vocab}, 0);
+                    pos_embd      = create_tensor(tn(LLM_TENSOR_POS_EMBD,    "weight"), {n_hidden_size, n_ctx_train}, 0);
+                    output_norm   = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_hidden_size}, 0);
+                    output_norm_b = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "bias"),   {n_hidden_size}, 0);
+                    projection    = create_tensor(tn(LLM_TENSOR_T_PROJECTION, "weight"), {n_hidden_size, n_embd}, 0);
 
                     for (int i = 0; i < n_layer; ++i) {
                         auto & layer = layers[i];
 
-                        layer.wq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "weight", i), {n_embd, n_embd}, 0);
-                        layer.bq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "bias", i),   {n_embd}, 0);
+                        layer.wq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "weight", i), {n_hidden_size, n_hidden_size}, 0);
+                        layer.bq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "bias", i),   {n_hidden_size}, 0);
 
-                        layer.wk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "weight", i), {n_embd, n_embd}, 0);
-                        layer.bk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "bias", i),   {n_embd}, 0);
+                        layer.wk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "weight", i), {n_hidden_size, n_hidden_size}, 0);
+                        layer.bk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "bias", i),   {n_hidden_size}, 0);
 
-                        layer.wv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "weight", i), {n_embd, n_embd}, 0);
-                        layer.bv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "bias", i),   {n_embd}, 0);
+                        layer.wv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "weight", i), {n_hidden_size, n_hidden_size}, 0);
+                        layer.bv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "bias", i),   {n_hidden_size}, 0);
 
-                        layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd, n_embd}, 0);
-                        layer.bo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "bias", i),   {n_embd}, 0);
+                        layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_hidden_size, n_hidden_size}, 0);
+                        layer.bo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "bias", i),   {n_hidden_size}, 0);
 
-                        layer.attn_norm     = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "weight", i),   {n_embd}, 0);
-                        layer.attn_norm_b   = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "bias", i),     {n_embd}, 0);
-                        layer.attn_norm_2   = create_tensor(tn(LLM_TENSOR_ATTN_NORM_2, "weight", i), {n_embd}, 0);
-                        layer.attn_norm_2_b = create_tensor(tn(LLM_TENSOR_ATTN_NORM_2, "bias", i),   {n_embd}, 0);
+                        layer.attn_norm     = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "weight", i),   {n_hidden_size}, 0);
+                        layer.attn_norm_b   = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "bias", i),     {n_hidden_size}, 0);
+                        layer.attn_norm_2   = create_tensor(tn(LLM_TENSOR_ATTN_NORM_2, "weight", i), {n_hidden_size}, 0);
+                        layer.attn_norm_2_b = create_tensor(tn(LLM_TENSOR_ATTN_NORM_2, "bias", i),   {n_hidden_size}, 0);
 
-                        layer.ffn_up     = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd, n_ff}, 0);
+                        layer.ffn_up     = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_hidden_size, n_ff}, 0);
                         layer.ffn_up_b   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "bias", i),   {n_ff}, 0);
-                        layer.ffn_down   = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "weight", i), {n_ff, n_embd}, 0);
-                        layer.ffn_down_b = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "bias", i),   {n_embd}, 0);
+                        layer.ffn_down   = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "weight", i), {n_ff, n_hidden_size}, 0);
+                        layer.ffn_down_b = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "bias", i),   {n_hidden_size}, 0);
                     }
                 } break;
             case LLM_ARCH_BGEVL_VISION:
                 {
                     // 3: R/G/B 257: 0-256
                     int num_patches = hparams.n_image_size / hparams.n_image_patch_size;
-                    tok_embd      = create_tensor(tn(LLM_TENSOR_V_PATCH_EMBD, "weight"), {hparams.n_image_patch_size, hparams.n_image_patch_size, 3, n_embd}, 0);
-                    pos_embd      = create_tensor(tn(LLM_TENSOR_POS_EMBD,     "weight"), {n_embd, num_patches * num_patches + 1}, 0);
-                    cls           = create_tensor(tn(LLM_TENSOR_CLS),                    {n_embd}, 0);
-                    output_norm   = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM,  "weight"), {n_embd}, 0);
-                    output_norm_b = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM,  "bias"),   {n_embd}, 0);
-                    input_norm    = create_tensor(tn(LLM_TENSOR_INPUT_NORM,   "weight"), {n_embd}, 0);
-                    input_norm_b  = create_tensor(tn(LLM_TENSOR_INPUT_NORM,   "bias"),   {n_embd}, 0);
-                    projection    = create_tensor(tn(LLM_TENSOR_V_PROJECTION, "weight"), {n_embd, 768}, 0);
+                    int n_hidden_size = hparams.n_hidden_size;
+                    tok_embd      = create_tensor(tn(LLM_TENSOR_V_PATCH_EMBD, "weight"), {hparams.n_image_patch_size, hparams.n_image_patch_size, 3, n_hidden_size}, 0);
+                    pos_embd      = create_tensor(tn(LLM_TENSOR_POS_EMBD,     "weight"), {n_hidden_size, num_patches * num_patches + 1}, 0);
+                    cls           = create_tensor(tn(LLM_TENSOR_CLS),                    {n_hidden_size}, 0);
+                    output_norm   = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM,  "weight"), {n_hidden_size}, 0);
+                    output_norm_b = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM,  "bias"),   {n_hidden_size}, 0);
+                    input_norm    = create_tensor(tn(LLM_TENSOR_INPUT_NORM,   "weight"), {n_hidden_size}, 0);
+                    input_norm_b  = create_tensor(tn(LLM_TENSOR_INPUT_NORM,   "bias"),   {n_hidden_size}, 0);
+                    projection    = create_tensor(tn(LLM_TENSOR_V_PROJECTION, "weight"), {n_hidden_size, n_embd}, 0);
 
                     for (int i = 0; i < n_layer; ++i) {
                         auto & layer = layers[i];
 
-                        layer.wq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "weight", i), {n_embd, n_embd}, 0);
-                        layer.bq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "bias", i),   {n_embd}, 0);
+                        layer.wq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "weight", i), {n_hidden_size, n_hidden_size}, 0);
+                        layer.bq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "bias", i),   {n_hidden_size}, 0);
 
-                        layer.wk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "weight", i), {n_embd, n_embd}, 0);
-                        layer.bk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "bias", i),   {n_embd}, 0);
+                        layer.wk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "weight", i), {n_hidden_size, n_hidden_size}, 0);
+                        layer.bk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "bias", i),   {n_hidden_size}, 0);
 
-                        layer.wv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "weight", i), {n_embd, n_embd}, 0);
-                        layer.bv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "bias", i),   {n_embd}, 0);
+                        layer.wv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "weight", i), {n_hidden_size, n_hidden_size}, 0);
+                        layer.bv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "bias", i),   {n_hidden_size}, 0);
 
-                        layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd, n_embd}, 0);
-                        layer.bo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "bias", i),   {n_embd}, 0);
+                        layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_hidden_size, n_hidden_size}, 0);
+                        layer.bo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "bias", i),   {n_hidden_size}, 0);
 
-                        layer.attn_norm     = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "weight", i),   {n_embd}, 0);
-                        layer.attn_norm_b   = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "bias", i),     {n_embd}, 0);
-                        layer.attn_norm_2   = create_tensor(tn(LLM_TENSOR_ATTN_NORM_2, "weight", i), {n_embd}, 0);
-                        layer.attn_norm_2_b = create_tensor(tn(LLM_TENSOR_ATTN_NORM_2, "bias", i),   {n_embd}, 0);
+                        layer.attn_norm     = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "weight", i),   {n_hidden_size}, 0);
+                        layer.attn_norm_b   = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "bias", i),     {n_hidden_size}, 0);
+                        layer.attn_norm_2   = create_tensor(tn(LLM_TENSOR_ATTN_NORM_2, "weight", i), {n_hidden_size}, 0);
+                        layer.attn_norm_2_b = create_tensor(tn(LLM_TENSOR_ATTN_NORM_2, "bias", i),   {n_hidden_size}, 0);
 
-                        layer.ffn_up     = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd, n_ff}, 0);
+                        layer.ffn_up     = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_hidden_size, n_ff}, 0);
                         layer.ffn_up_b   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "bias", i),   {n_ff}, 0);
-                        layer.ffn_down   = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "weight", i), {n_ff, n_embd}, 0);
-                        layer.ffn_down_b = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "bias", i),   {n_embd}, 0);
+                        layer.ffn_down   = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "weight", i), {n_ff, n_hidden_size}, 0);
+                        layer.ffn_down_b = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "bias", i),   {n_hidden_size}, 0);
                     }
                 } break;
             case LLM_ARCH_BLOOM:
@@ -6140,7 +6144,7 @@ struct llm_build_bert : public llm_graph_context {
 
 struct llm_build_cliptext : public llm_graph_context {
     llm_build_cliptext(const llama_model & model, const llm_graph_params & params, ggml_cgraph * gf): llm_graph_context(params) {
-        const int64_t n_embd_head = hparams.n_embd_head_v;
+        const int64_t n_embd_head = hparams.n_hidden_size / n_head;
         ggml_tensor * cur;
         // construct input embeddings (token, type, position)
         ggml_tensor * inpL = build_inp_embd(model.tok_embd);
@@ -6197,6 +6201,7 @@ struct llm_build_cliptext : public llm_graph_context {
         }
 
         cur = inpL;
+        cur = ggml_mul_mat(ctx0, model.projection, cur);
         // cur = ggml_mul_mat(ctx0, inpl);
 
         cb(cur, "result_embd", -1);
@@ -6209,7 +6214,7 @@ struct llm_build_cliptext : public llm_graph_context {
 
 struct llm_build_clipvision : public llm_graph_context {
     llm_build_clipvision(const llama_model & model, const llm_graph_params & params, ggml_cgraph * gf): llm_graph_context(params) {
-        const int64_t n_embd_head = hparams.n_embd_head_v;
+        const int64_t n_embd_head = hparams.n_hidden_size / n_head;
         int num_position = (params.hparams.n_image_size / params.hparams.n_image_patch_size) * (params.hparams.n_image_size / params.hparams.n_image_patch_size) + 1;
 
         auto inp = std::make_unique<llm_graph_input_embd>();
@@ -6323,15 +6328,7 @@ struct llm_build_clipvision : public llm_graph_context {
         }
         cur = ggml_view_2d(ctx0, inpL, inpL->ne[0], 1, inpL->ne[0], 0);
         cur = build_norm(cur, model.output_norm, model.output_norm_b, LLM_NORM, -1);
-        // cur = build_norm(inpL, ggml_repeat(ctx0, model.output_norm, cur), ggml_repeat(ctx0, model.output_norm_b, cur), LLM_NORM, -1);
-        cb(cur, "before_projection", -1);
-        // printf("22222222222222222============\noutput_norm: %s %ld %ld %ld %ld %d\n", model.output_norm->name, model.output_norm->ne[0], model.output_norm->ne[1], model.output_norm->ne[2], model.output_norm->ne[3], model.output_norm->type);
-
-        // printf("output_norm_b: %s %ld %ld %ld %ld %d\n", model.output_norm_b->name, model.output_norm_b->ne[0], model.output_norm_b->ne[1], model.output_norm->ne[2], model.output_norm->ne[3], model.output_norm_b->type);
-        // printf("cur: %s %ld %ld %ld %ld %d\n", cur->name, cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3], cur->type);
-        // printf("inpL: %s %ld %ld %ld %ld %d\n", inpL->name, inpL->ne[0], inpL->ne[1], inpL->ne[2], inpL->ne[3], inpL->type);
-        // cur = ggml_mul_mat(ctx0, model.projection, cur);
-        // printf("11111111111111111============\ncur: %s %ld %ld %ld %ld %d\n", cur->name, cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3], cur->type);
+        cur = ggml_mul_mat(ctx0, model.projection, cur);
         cb(cur, "result_embd", -1);
         res->t_embd = cur;
 

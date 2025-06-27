@@ -68,6 +68,7 @@ struct llama_hparams {
     uint32_t n_norm_groups      = 0;
     uint32_t n_image_size       = 0;
     uint32_t n_image_patch_size = 0;
+    uint32_t n_hidden_size      = 0;
 
     float    expert_weights_scale = 0.0;
     bool     expert_weights_norm  = false;
@@ -192,4 +193,3 @@ struct llama_hparams {
 };
 
 static_assert(std::is_trivially_copyable<llama_hparams>::value, "llama_hparams must be trivially copyable");
-
