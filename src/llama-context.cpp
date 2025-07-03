@@ -759,6 +759,18 @@ int llama_context::encode(llama_batch & inp_batch) {
     cparams.causal_attn = causal_attn_org;
 
     const auto compute_status = graph_compute(gf, n_tokens > 1);
+    ggml_tensor* input_embeds = ggml_graph_get_tensor(gf, "input_embeds");
+    ggml_tensor* patch_embeds = ggml_graph_get_tensor(gf, "patch_embeds");
+
+    if (input_embeds->data) {
+        printf("input_embeds: %d %f %f %f %f %f %f %f %f\n", input_embeds->type, (((float*)input_embeds->data)[0]), (((float*)input_embeds->data)[1]), (((float*)input_embeds->data)[2]), (((float*)input_embeds->data)[3]), (((float*)input_embeds->data)[4]), (((float*)input_embeds->data)[5]), (((float*)input_embeds->data)[6]), (((float*)input_embeds->data)[7]));
+    }
+    else { printf("input_embeds is None\n"); }
+    if (patch_embeds->data) {
+        printf("patch_embeds: %d %f %f %f %f %f %f %f %f\n", patch_embeds->type, (((float*)patch_embeds->data)[0]), (((float*)patch_embeds->data)[1]), (((float*)patch_embeds->data)[2]), (((float*)patch_embeds->data)[3]), (((float*)patch_embeds->data)[4]), (((float*)patch_embeds->data)[5]), (((float*)patch_embeds->data)[6]), (((float*)patch_embeds->data)[7]));
+    }
+    else { printf("patch_embeds is None\n"); }
+
     switch (compute_status) {
         case GGML_STATUS_SUCCESS:
             break;
