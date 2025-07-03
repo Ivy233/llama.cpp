@@ -17,10 +17,39 @@ void llm_graph_input_embd::set_input(const llama_ubatch * ubatch) {
     }
 
     if (ubatch->embd) {
-        const int64_t n_embd   = embd->ne[0];
+        // 计算张量的总元素数量
+        int64_t total_elements = 1;
+        for (int i = 0; i < GGML_MAX_DIMS; ++i) {
+            if (embd->ne[i] > 1 || i == 0) {
+                total_elements *= embd->ne[i];
+            } else {
+                break;
+            }
+        }
+        
         const int64_t n_tokens = ubatch->n_tokens;
+        
+        // 添加详细调试信息
+        printf("=== llm_graph_input_embd::set_input 调试信息（修复版）===\n");
+        printf("ubatch->embd 指针: %p\n", ubatch->embd);
+        printf("embd 张量指针: %p\n", embd);
+        printf("embd 张量维度: [%ld, %ld, %ld, %ld]\n", embd->ne[0], embd->ne[1], embd->ne[2], embd->ne[3]);
+        printf("计算的总元素数: %ld\n", total_elements);
+        printf("n_tokens: %ld\n", n_tokens);
+        printf("传输大小: %ld bytes\n", total_elements*ggml_element_size(embd));
+        
+        // 打印源数据前10个值
+        printf("源数据 ubatch->embd 前10个值: ");
+        for (int i = 0; i < 10 && i < total_elements; ++i) {
+            printf("%.6f ", ubatch->embd[i]);
+        }
+        printf("\n");
 
-        ggml_backend_tensor_set(embd, ubatch->embd, 0, n_tokens*n_embd*ggml_element_size(embd));
+        // 传输完整的张量数据
+        ggml_backend_tensor_set(embd, ubatch->embd, 0, total_elements*ggml_element_size(embd));
+        
+        printf("数据传输完成（完整张量）\n");
+        printf("=================================================\n");
     }
 }
 
