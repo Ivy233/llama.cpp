@@ -2828,6 +2828,63 @@ struct ggml_cplan ggml_graph_plan(
     return cplan;
 }
 
+// 添加调试打印函数
+static void debug_print_tensor_values(struct ggml_tensor * tensor, const char * prefix, const char * node_name) {
+    if (!tensor || !tensor->data) {
+        printf("DEBUG: %s %s - tensor is null or data is null\n", prefix, node_name);
+        return;
+    }
+    
+    printf("DEBUG: %s %s - shape: [%ld, %ld, %ld, %ld], type: %d\n", 
+           prefix, node_name, tensor->ne[0], tensor->ne[1], tensor->ne[2], tensor->ne[3], tensor->type);
+    
+    if (tensor->type == GGML_TYPE_F32) {
+        float* data = (float*)tensor->data;
+        int64_t total_elements = ggml_nelements(tensor);
+        int print_count = total_elements > 10 ? 10 : (int)total_elements;
+        
+        printf("DEBUG: %s %s - first %d values: ", prefix, node_name, print_count);
+        for (int i = 0; i < print_count; i++) {
+            printf("%.6f ", data[i]);
+        }
+        printf("\n");
+        
+        // 计算数值范围
+        if (total_elements > 0) {
+            float min_val = data[0], max_val = data[0];
+            for (int64_t i = 1; i < total_elements; i++) {
+                if (data[i] < min_val) min_val = data[i];
+                if (data[i] > max_val) max_val = data[i];
+            }
+            printf("DEBUG: %s %s - range: [%.6f, %.6f], total_elements: %lld\n", 
+                   prefix, node_name, min_val, max_val, (long long)total_elements);
+        }
+    } else if (tensor->type == GGML_TYPE_F16) {
+        ggml_fp16_t* data = (ggml_fp16_t*)tensor->data;
+        int64_t total_elements = ggml_nelements(tensor);
+        int print_count = total_elements > 10 ? 10 : (int)total_elements;
+        
+        printf("DEBUG: %s %s - first %d values (F16): ", prefix, node_name, print_count);
+        for (int i = 0; i < print_count; i++) {
+            printf("%.6f ", ggml_fp16_to_fp32(data[i]));
+        }
+        printf("\n");
+    } else if (tensor->type == GGML_TYPE_I32) {
+        int32_t* data = (int32_t*)tensor->data;
+        int64_t total_elements = ggml_nelements(tensor);
+        int print_count = total_elements > 10 ? 10 : (int)total_elements;
+        
+        printf("DEBUG: %s %s - first %d values (I32): ", prefix, node_name, print_count);
+        for (int i = 0; i < print_count; i++) {
+            printf("%d ", data[i]);
+        }
+        printf("\n");
+    } else {
+        printf("DEBUG: %s %s - unsupported tensor type: %d\n", prefix, node_name, tensor->type);
+    }
+    fflush(stdout);
+}
+
 static thread_ret_t ggml_graph_compute_thread(void * data) {
     struct ggml_compute_state * state = (struct ggml_compute_state *) data;
     struct ggml_threadpool    * tp    = state->threadpool;
@@ -2844,11 +2901,39 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         /*.wdata     =*/ cplan->work_data,
         /*.threadpool=*/ tp,
     };
-
+    printf(" cgraph->n_nodes : %d\n", cgraph->n_nodes);
+    
     for (int node_n = 0; node_n < cgraph->n_nodes && atomic_load_explicit(&tp->abort, memory_order_relaxed) != node_n; node_n++) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
-
+        
+        // 打印节点名字和基本信息
+        if(node_n < 180){
+            printf("=== Node %d: %s ===\n", node_n, node->name ? node->name : "unnamed");
+            printf("Node operation: %s\n", ggml_op_name(node->op));
+            
+            // 打印输入tensor的值
+            if (node->src[0] != NULL) {
+                debug_print_tensor_values(node->src[0], "INPUT[0]", node->src[0]->name ? node->src[0]->name : "unnamed");
+            }
+            if (node->src[1] != NULL) {
+                debug_print_tensor_values(node->src[1], "INPUT[1]", node->src[1]->name ? node->src[1]->name : "unnamed");
+            }
+            if (node->src[2] != NULL) {
+                debug_print_tensor_values(node->src[2], "INPUT[2]", node->src[2]->name ? node->src[2]->name : "unnamed");
+            }
+            
+            fflush(stdout); 
+        }
+        
+        // 执行前向传播
         ggml_compute_forward(&params, node);
+        
+        // 打印输出tensor的值
+        if(node_n < 100){
+            debug_print_tensor_values(node, "OUTPUT", node->name ? node->name : "unnamed");
+            printf("=== End Node %d ===\n\n", node_n);
+            fflush(stdout);
+        }
 
         if (state->ith == 0 && cplan->abort_callback &&
                 cplan->abort_callback(cplan->abort_callback_data)) {
@@ -3085,6 +3170,7 @@ struct ggml_threadpool * ggml_threadpool_new(struct ggml_threadpool_params * tpp
 }
 
 enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cplan * cplan) {
+    printf("enter ggml_graph_compute\n");
     ggml_cpu_init();
 
     GGML_ASSERT(cplan);
@@ -3137,7 +3223,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
 
     // Kick all threads to start the new graph
     ggml_graph_compute_kickoff(threadpool, n_threads);
-
+    printf("begin ggml_graph_compute_thread\n");
     // This is a work thread too
     ggml_graph_compute_thread(&threadpool->workers[0]);
 #endif

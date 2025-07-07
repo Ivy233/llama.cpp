@@ -113,7 +113,7 @@ static void batch_decode(llama_context * ctx, llama_batch & batch, float * outpu
 }
 
 // Function to preprocess image for embedding
-llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int height, int channels, int target_size)
+llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int height, int channels, int target_size, int patch_size)
 {
     llama_batch batch = {};
 
@@ -199,10 +199,17 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
             }
         }
     }
+    //TODO remove
 
-    batch = llama_batch_init(1, target_size * target_size * 3, 1);
+    int image_size = 224;
+    int num_patches_per_dim = height / patch_size;
+    printf("num_patches_per_dim: %d\n", num_patches_per_dim);
+    int num_patches = num_patches_per_dim * num_patches_per_dim;
+    
+    batch = llama_batch_init(num_patches, target_size * target_size * 3, 1);
 
-    batch.n_tokens = 1;
+    batch.n_tokens = num_patches;
+    printf("target_size * target_size * 3: %d\n", target_size * target_size * 3);
     for (int i = 0; i < target_size * target_size * 3; ++i) {
         batch.embd[i] = processed[i];
     }
@@ -210,7 +217,9 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
         batch.seq_id[i][0] = 0;
     }
     batch.n_seq_id[0] = 1;
-    batch.pos[0] = 0;
+    for (int i = 0; i < num_patches; i++) {
+        batch.pos[i] = i;
+    }
 
     // === 详细调试信息输出 ===
     printf("=== llama.cpp BGE-VL 图像预处理调试信息 ===\n");
@@ -339,7 +348,10 @@ static bool process_image_embedding(llama_context * ctx, const std::string & ima
     // Process the image to get embeddings
     // Create image tensor and process it
     printf("开始图像预处理...\n");
-    struct llama_batch llm_batch = llama_image_preprocess(rgb_data, width, height, channels, 224);
+    auto model = llama_get_model(ctx);
+    auto patch_size = get_n_image_patch_size(ctx);
+    printf("patch_size: %d\n", patch_size);
+    struct llama_batch llm_batch = llama_image_preprocess(rgb_data, width, height, channels, 224, patch_size);
     
     printf("开始BGE-VL模型推理...\n");
     // Get image embeddings

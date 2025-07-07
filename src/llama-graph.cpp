@@ -44,7 +44,6 @@ void llm_graph_input_embd::set_input(const llama_ubatch * ubatch) {
             printf("%.6f ", ubatch->embd[i]);
         }
         printf("\n");
-
         // 传输完整的张量数据
         ggml_backend_tensor_set(embd, ubatch->embd, 0, total_elements*ggml_element_size(embd));
         
@@ -54,6 +53,14 @@ void llm_graph_input_embd::set_input(const llama_ubatch * ubatch) {
 }
 
 void llm_graph_input_pos::set_input(const llama_ubatch * ubatch) {
+    printf("ubatch->pos: %d\n", ubatch->pos);
+    printf("pos: %d\n", pos);
+    printf("ubatch->n_tokens: %d\n", ubatch->n_tokens);
+    printf("ubatch->token: %d\n", ubatch->token);
+    printf("n_pos_per_embd: %d\n", n_pos_per_embd);
+    for(int i = 0; i < 10; i++) {
+        printf("ubatch->pos[%d]: %d\n", i, ubatch->pos[i]);
+    }
     if (ubatch->pos && pos) {
         const int64_t n_tokens = ubatch->n_tokens;
 

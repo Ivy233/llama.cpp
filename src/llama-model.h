@@ -387,6 +387,7 @@ struct llama_model {
     size_t n_tensors() const;
     size_t n_devices() const;
 
+    uint32_t n_image_patch_size() const;
     // total number of parameters in the model
     uint64_t n_elements() const;
 

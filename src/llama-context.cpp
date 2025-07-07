@@ -188,7 +188,8 @@ llama_context::llama_context(
 
         memory.reset(model.create_memory(params_mem, cparams));
     }
-
+    printf("hparams.vocab_only: %d\n",hparams.vocab_only);
+    printf("begin memory: %p\n", memory.get());
     // init backends
     if (!hparams.vocab_only) {
         LLAMA_LOG_DEBUG("%s: enumerating backends\n", __func__);
@@ -442,6 +443,12 @@ uint32_t llama_context::n_threads() const {
 uint32_t llama_context::n_threads_batch() const {
     return cparams.n_threads_batch;
 }
+
+uint32_t llama_context::n_image_patch_size() const {
+    return model.hparams.n_image_patch_size;
+}
+
+
 
 llama_kv_cache * llama_context::get_kv_self() {
     llama_kv_cache * kv_self = static_cast<llama_kv_cache *>(memory.get());
@@ -868,6 +875,7 @@ int llama_context::encode(llama_batch & inp_batch) {
 }
 
 int llama_context::decode(llama_batch & inp_batch) {
+    printf("memory: %p\n", memory.get());
     if (!memory) {
         LLAMA_LOG_DEBUG("%s: cannot decode batches with this context (calling encode() instead)\n", __func__);
         return encode(inp_batch);
@@ -962,7 +970,9 @@ int llama_context::decode(llama_batch & inp_batch) {
 
     while (sbatch.n_tokens > 0) {
         llama_ubatch ubatch = kv_self->ubatch_next(sbatch, cparams.n_ubatch, embd_pooled);
-
+        printf("sbatch.n_tokens: %d\n", sbatch.n_tokens);
+        printf("ubatch.n_tokens: %d\n", ubatch.n_tokens);
+        printf("%d\n",1/0);
         // count the outputs in this u_batch
         {
             int32_t n_outputs_new = 0;
@@ -2684,4 +2694,8 @@ void llama_opt_epoch(
         idata_split,
         callback_train,
         callback_eval);
+}
+
+uint32_t get_n_image_patch_size(llama_context *ctx) {
+    return ctx->n_image_patch_size();
 }

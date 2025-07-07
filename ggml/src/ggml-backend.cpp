@@ -1146,6 +1146,9 @@ static void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct gg
 
             if (node_backend_id != cur_backend_id || need_new_split) {
                 split->i_end = i;
+                printf("node name: %s\n", node->name);
+                printf("node_backend_id: %d\n", node_backend_id);
+                printf("cur_backend_id: %d\n", cur_backend_id);
                 i_split++;
                 if (i_split >= sched->splits_capacity) {
                     sched->splits_capacity *= 2;
@@ -1356,7 +1359,7 @@ static bool ggml_backend_sched_alloc_splits(ggml_backend_sched_t sched) {
 
 static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t sched) {
     struct ggml_backend_sched_split * splits = sched->splits;
-
+    printf("sched->n_splits: %d\n", sched->n_splits);
     for (int i = 0; i < sched->n_splits; i++) {
         struct ggml_backend_sched_split * split = &splits[i];
         int split_backend_id = split->backend_id;

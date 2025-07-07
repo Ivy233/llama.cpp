@@ -58,6 +58,8 @@ struct llama_context {
     float * get_embeddings_ith(int32_t i);
     float * get_embeddings_seq(llama_seq_id seq_id);
 
+    uint32_t n_image_patch_size() const;
+
     void attach_threadpool(
             ggml_threadpool_t threadpool,
             ggml_threadpool_t threadpool_batch);

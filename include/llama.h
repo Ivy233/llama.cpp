@@ -1370,6 +1370,8 @@ extern "C" {
             ggml_opt_epoch_callback   callback_train,
             ggml_opt_epoch_callback   callback_eval);
 
+    LLAMA_API  uint32_t get_n_image_patch_size(llama_context *ctx);
+    
 #ifdef __cplusplus
 }
 #endif
