@@ -6356,7 +6356,7 @@ struct llm_build_clipvision : public llm_graph_context {
                 NULL,                      NULL,                        NULL,
                 model.layers[il].ffn_down, model.layers[il].ffn_down_b, NULL,
                 NULL,
-                LLM_FFN_GELU, LLM_FFN_SEQ, il);
+                LLM_FFN_QUICK_GELU, LLM_FFN_SEQ, il);
             cb(cur, "ffn_out", il);
             // add
             cur = ggml_add(ctx0, cur, ffn_inp);

@@ -371,6 +371,14 @@ static bool process_image_embedding(llama_context * ctx, const std::string & ima
     return true;
 }
 
+std::string get_file_extension(const std::string& filename) {
+    size_t pos = filename.find_last_of('.');
+    if (pos != std::string::npos) {
+        return filename.substr(pos + 1);
+    }
+    return "";
+}
+
 int main(int argc, char ** argv) {
     common_params params;
 
@@ -545,7 +553,14 @@ int main(int argc, char ** argv) {
                     LOG("%9.6f ", emb[i]);
                 }
             }
-            std::ofstream outfile("/root/BGE-VL-result/llama_cpp_embeddings.txt");
+            
+            std::string ext = get_file_extension(params.image[0]);
+            printf("ext: %s\n", ext.c_str());
+            std::string output_filename;
+     
+            output_filename = "/root/compare/cpp_" + ext + "_embd.txt";
+            
+            std::ofstream outfile(output_filename);
             if (outfile.is_open()) {
                 for (int i = 0; i < n_embd; i++) {
                     if (params.embd_normalize == 0) {
@@ -559,10 +574,11 @@ int main(int argc, char ** argv) {
                 }
                 outfile << std::endl;
                 outfile.close();
-                printf("\nEmbedding已保存到: /root/BGE-VL-result/llama_cpp_embeddings.txt\n");
+                printf("\nEmbedding已保存到: %s\n", output_filename.c_str());
             } else {
-                printf("错误: 无法创建输出文件\n");
+                printf("\n错误：无法创建文件 %s\n", output_filename.c_str());
             }
+
             LOG("\n");
         } else if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
             for (int j = 0; j < n_embd_count; j++) {

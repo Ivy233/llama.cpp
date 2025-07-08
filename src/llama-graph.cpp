@@ -692,6 +692,16 @@ ggml_tensor * llm_graph_context::build_ffn(
                 cur = ggml_mul(ctx0, x0, x1);
                 cb(cur, "ffn_mul", il);
             } break;
+        case LLM_FFN_QUICK_GELU:
+            {
+                cur = ggml_gelu_quick(ctx0, cur);
+                cb(cur, "ffn_quick_gelu", il);
+                if (act_scales != NULL) {
+                    cur = ggml_div(ctx0, cur, act_scales);
+                    cb(cur, "ffn_act", il);
+                }
+
+            }
     }
 
     if (gate && type_gate == LLM_FFN_PAR) {
