@@ -12,6 +12,8 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
+#include <fstream>  
+#include <iomanip> 
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -201,7 +203,6 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
     }
     //TODO remove
 
-    int image_size = 224;
     int num_patches_per_dim = height / patch_size;
     printf("num_patches_per_dim: %d\n", num_patches_per_dim);
     int num_patches = num_patches_per_dim * num_patches_per_dim;
@@ -213,14 +214,12 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
     for (int i = 0; i < target_size * target_size * 3; ++i) {
         batch.embd[i] = processed[i];
     }
-    for (int i = 0; i < 1; i++) {
-        batch.seq_id[i][0] = 0;
-    }
-    batch.n_seq_id[0] = 1;
     for (int i = 0; i < num_patches; i++) {
-        batch.pos[i] = i;
+        batch.seq_id[i][0] = 0;  
+        batch.n_seq_id[i] = 1;  
+        batch.pos[i] = i;      
     }
-
+    //batch.n_tokens = 1;
     // === 详细调试信息输出 ===
     printf("=== llama.cpp BGE-VL 图像预处理调试信息 ===\n");
     printf("输入图像尺寸: %dx%d, 通道数: %d\n", width, height, channels);
@@ -355,6 +354,7 @@ static bool process_image_embedding(llama_context * ctx, const std::string & ima
     
     printf("开始BGE-VL模型推理...\n");
     // Get image embeddings
+    printf("llm_batch.n_tokens: %d\n", llm_batch.n_tokens);
     batch_decode(ctx, llm_batch, output, 1, n_embd, embd_norm);
 
     printf("BGE-VL embedding生成完成！\n");
@@ -544,6 +544,24 @@ int main(int argc, char ** argv) {
                 } else {
                     LOG("%9.6f ", emb[i]);
                 }
+            }
+            std::ofstream outfile("/root/BGE-VL-result/llama_cpp_embeddings.txt");
+            if (outfile.is_open()) {
+                for (int i = 0; i < n_embd; i++) {
+                    if (params.embd_normalize == 0) {
+                        LOG("%6.0f ", emb[i]);
+                        outfile << std::fixed << std::setprecision(6) << emb[i];
+                    } else {
+                        LOG("%9.6f ", emb[i]);
+                        outfile << std::fixed << std::setprecision(6) << emb[i];
+                    }
+                    if (i < n_embd - 1) outfile << " ";
+                }
+                outfile << std::endl;
+                outfile.close();
+                printf("\nEmbedding已保存到: /root/BGE-VL-result/llama_cpp_embeddings.txt\n");
+            } else {
+                printf("错误: 无法创建输出文件\n");
             }
             LOG("\n");
         } else if (pooling_type == LLAMA_POOLING_TYPE_NONE) {

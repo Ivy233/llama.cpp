@@ -2929,7 +2929,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         ggml_compute_forward(&params, node);
         
         // 打印输出tensor的值
-        if(node_n < 100){
+        if(node_n < 180){
             debug_print_tensor_values(node, "OUTPUT", node->name ? node->name : "unnamed");
             printf("=== End Node %d ===\n\n", node_n);
             fflush(stdout);

@@ -6366,6 +6366,7 @@ struct llm_build_clipvision : public llm_graph_context {
         }
         cur = ggml_view_2d(ctx0, inpL, inpL->ne[0], 1, inpL->ne[0], 0);
         cur = build_norm(cur, model.output_norm, model.output_norm_b, LLM_NORM, -1);
+        cb(cur, "result_norm", -1);
         cur = ggml_mul_mat(ctx0, model.projection, cur);
         cb(cur, "result_embd", -1);
         

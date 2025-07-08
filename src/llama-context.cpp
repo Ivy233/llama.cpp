@@ -803,6 +803,8 @@ int llama_context::encode(llama_batch & inp_batch) {
                     GGML_ASSERT(embd != nullptr);
 
                     GGML_ASSERT(n_tokens*n_embd <= (int64_t) embd_size);
+                    printf("n_emdb: %d\n", n_embd);
+                    printf("n_tokens: %d\n",n_tokens);
                     ggml_backend_tensor_get_async(backend_embd, t_embd, embd, 0, n_tokens*n_embd*sizeof(float));
                 } break;
             case LLAMA_POOLING_TYPE_MEAN:
