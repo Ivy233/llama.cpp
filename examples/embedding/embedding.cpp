@@ -42,7 +42,7 @@ static void batch_add_seq(llama_batch & batch, const std::vector<int32_t> & toke
     }
 }
 
-static void batch_decode(llama_context * ctx, llama_batch & batch, float * output, int n_seq, int n_embd, int embd_norm) {
+static void batch_encode(llama_context * ctx, llama_batch & batch, float * output, int n_seq, int n_embd, int embd_norm) {
     const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
 
     // clear previous kv_cache values (irrelevant for embeddings)
@@ -62,7 +62,7 @@ static void batch_decode(llama_context * ctx, llama_batch & batch, float * outpu
 
     // run model
     printf("%s: n_tokens = %d, n_seq = %d\n", __func__, batch.n_tokens, n_seq);
-    if (llama_decode(ctx, batch) < 0) {
+    if (llama_encode(ctx, batch) < 0) {
         printf("%s : failed to process\n", __func__);
     }
 
@@ -355,7 +355,7 @@ static bool process_image_embedding(llama_context * ctx, const std::string & ima
     printf("开始BGE-VL模型推理...\n");
     // Get image embeddings
     printf("llm_batch.n_tokens: %d\n", llm_batch.n_tokens);
-    batch_decode(ctx, llm_batch, output, 1, n_embd, embd_norm);
+    batch_encode(ctx, llm_batch, output, 1, n_embd, embd_norm);
 
     printf("BGE-VL embedding生成完成！\n");
     printf("最终embedding维度: %d\n", n_embd);
@@ -522,7 +522,7 @@ int main(int argc, char ** argv) {
             // encode if at capacity
             if (batch.n_tokens + n_toks > n_batch) {
                 float * out = emb + e * n_embd;
-                batch_decode(ctx, batch, out, s, n_embd, params.embd_normalize);
+                batch_encode(ctx, batch, out, s, n_embd, params.embd_normalize);
                 e += pooling_type == LLAMA_POOLING_TYPE_NONE ? batch.n_tokens : s;
                 s = 0;
                 common_batch_clear(batch);
@@ -535,7 +535,7 @@ int main(int argc, char ** argv) {
 
         // final batch
         float * out = emb + e * n_embd;
-        batch_decode(ctx, batch, out, s, n_embd, params.embd_normalize);
+        batch_encode(ctx, batch, out, s, n_embd, params.embd_normalize);
         // clean up batch
         llama_batch_free(batch);
     }
