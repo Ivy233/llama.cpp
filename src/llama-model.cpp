@@ -20,7 +20,6 @@
 #include <regex>
 #include <sstream>
 #include <stdexcept>
-
 const char * llm_type_name(llm_type type) {
     switch (type) {
         case LLM_TYPE_14M:           return "14M";
@@ -6153,8 +6152,9 @@ struct llm_build_cliptext : public llm_graph_context {
         // construct input embeddings (token, type, position)
         ggml_tensor * inpL = build_inp_embd(model.tok_embd);
         ggml_tensor * inp_pos = build_inp_pos();
+        cb(inp_pos, "inp_pos", -1);
         inpL = ggml_add(ctx0, inpL, ggml_get_rows(ctx0, model.pos_embd, inp_pos));
-
+        cb(inpL, "added_inpl", -1);
         auto * inp_attn = build_attn_inp_no_cache();
         // iterate layers
         for (int il = 0; il < n_layer; ++il) {
@@ -13590,6 +13590,7 @@ llm_graph_result_ptr llama_model::build_graph(
                    ggml_cgraph * gf,
                 llm_graph_type   type) const {
     std::unique_ptr<llm_graph_context> llm;
+    
     switch (arch) {
         case LLM_ARCH_LLAMA:
         case LLM_ARCH_MINICPM:
@@ -14119,6 +14120,8 @@ bool llama_model_has_encoder(const llama_model * model) {
     switch (model->arch) {
         case LLM_ARCH_T5:        return true;
         case LLM_ARCH_T5ENCODER: return true;
+        case LLM_ARCH_BGEVL_TEXT:    return true;
+        case LLM_ARCH_BGEVL_VISION:  return true;
         default:                 return false;
     }
 }
@@ -14126,6 +14129,8 @@ bool llama_model_has_encoder(const llama_model * model) {
 bool llama_model_has_decoder(const llama_model * model) {
     switch (model->arch) {
         case LLM_ARCH_T5ENCODER: return false;
+        case LLM_ARCH_BGEVL_TEXT:    return false;
+        case LLM_ARCH_BGEVL_VISION:  return false;
         default:                 return true;
     }
 }

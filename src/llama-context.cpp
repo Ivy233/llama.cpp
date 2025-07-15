@@ -766,16 +766,6 @@ int llama_context::encode(llama_batch & inp_batch) {
     cparams.causal_attn = causal_attn_org;
 
     const auto compute_status = graph_compute(gf, n_tokens > 1);
-    ggml_tensor* input_embeds = ggml_graph_get_tensor(gf, "input_embeds");
-    ggml_tensor* patch_embeds = ggml_graph_get_tensor(gf, "patch_embeds");
-
-    if (input_embeds->data) {
-        for(int index = 0; index < 10; index++){
-            printf("input_embeds: %d %f\n", index, (((float*)input_embeds->data)[index]));
-        }
-    }
-    else { printf("input_embeds is None\n"); }
-    
 
     switch (compute_status) {
         case GGML_STATUS_SUCCESS:

@@ -108,7 +108,7 @@ class TensorNameMap:
                         if "layers" in parts:
                             layer_idx = parts.index("layers")
                             if layer_idx + 1 < len(parts):
-                                bid = int(parts[layer_idx + 1])
+                                _bid = int(parts[layer_idx + 1])
                                 # 构造模板键并查找映射
                                 base_template = template_key.replace(".weight", "").replace(".bias", "")
                                 if base_template in self.mapping:
@@ -133,7 +133,7 @@ class BGEClipConverter:
         self.model_keys_path = model_keys_path
         self.config = self.load_config()
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_dir)
-
+        
         # 文本模型参数
         self.text_n_blocks = self.config["text_config"]["num_hidden_layers"]
         self.text_n_heads = self.config["text_config"]["num_attention_heads"]
@@ -178,18 +178,65 @@ class BGEClipConverter:
         self.text_gguf_writer.add_block_count(self.text_n_blocks)
         self.text_gguf_writer.add_layer_norm_eps(self.text_layer_norm_eps)
         self.text_gguf_writer.add_causal_attention(False)
-        self.text_gguf_writer.add_tokenizer_model("bert")
+        self.text_gguf_writer.add_tokenizer_model("gpt2")
+        self.text_gguf_writer.add_tokenizer_pre("clip")
+        self.text_gguf_writer.add_add_space_prefix(True)
+
+       
         tokens = [0 for i in range(self.tokenizer.vocab_size)]
+        scores = [0.0 for i in range(self.tokenizer.vocab_size)]
+        toktypes: list[int] = []
         for key, val in self.tokenizer.get_vocab().items():
             tokens[val] = key
+            
+            # Determine token type
+            token_text = key
+            if token_text.startswith('[') and token_text.endswith(']'):
+                if token_text == "[UNK]":
+                    toktypes.append(gguf.TokenType.UNKNOWN)
+                elif token_text in ("[CLS]", "[SEP]", "[PAD]", "[MASK]"):
+                    toktypes.append(gguf.TokenType.CONTROL)
+                else:
+                    toktypes.append(gguf.TokenType.UNUSED)
+            else:
+                toktypes.append(gguf.TokenType.NORMAL)
+        
+
         self.text_gguf_writer.add_token_list(tokens)
+        self.text_gguf_writer.add_token_scores(scores)
+        self.text_gguf_writer.add_token_types(toktypes)
+
+        # Add merges for BPE tokenizer
+        if hasattr(self.tokenizer, 'merges'):
+            merges = []
+            for merge in self.tokenizer.merges:
+                # Convert merge tuple to string format
+                merge_str = ' '.join(merge)
+                merges.append(merge_str)
+            self.text_gguf_writer.add_token_merges(merges)
+        else:
+            # Try to get merges from the tokenizer's merge file
+            merge_file = self.model_dir / "merges.txt"
+            if merge_file.exists():
+                with open(merge_file, 'r', encoding='utf-8') as f:
+                    merges = [line.strip() for line in f if line.strip()]
+                self.text_gguf_writer.add_token_merges(merges)
+            else:
+                print("Warning: No merges found for BPE tokenizer")
+
+        # Manually add special tokens since we are not using SpecialVocab for merges
+        self.text_gguf_writer.add_bos_token_id(self.tokenizer.bos_token_id)
+        self.text_gguf_writer.add_eos_token_id(self.tokenizer.eos_token_id)
+        self.text_gguf_writer.add_unk_token_id(self.tokenizer.unk_token_id)
+        self.text_gguf_writer.add_pad_token_id(self.tokenizer.pad_token_id)
+
         self.text_gguf_writer.add_feed_forward_length(self.text_intermediate_size)
         self.text_gguf_writer.add_head_count(self.text_n_heads)
         self.text_gguf_writer.add_vocab_size(self.text_vocab_size)
         self.text_gguf_writer.add_file_type(self.ftype)
         self.text_gguf_writer.add_uint32(f"{CLIP_TEXT_ARCH}.hidden_size", self.text_hidden_size)
-        self.text_gguf_writer.add_eos_token_id(self.config["text_config"]["eos_token_id"])
-        self.text_gguf_writer.add_bos_token_id(self.config["text_config"]["bos_token_id"])
+        # self.text_gguf_writer.add_eos_token_id(self.config["text_config"]["eos_token_id"])
+        # self.text_gguf_writer.add_bos_token_id(self.config["text_config"]["bos_token_id"])
         self.text_gguf_writer.add_logit_scale(self.config["logit_scale_init_value"])
         # self.text_gguf_writer.add_key_value(f"{CLIP_TEXT_ARCH}.hidden_size", self.config["text_config"]["hidden_size"], gguf.GGUFValueType.UINT32)
 
@@ -288,7 +335,7 @@ class BGEClipConverter:
             tensor = tensor.to(torch.float32)
         else:
             tensor = tensor.to(torch.float32)
-        print(f"Converting tensor: {name} => {model_type}: {gguf_name} | type: {tensor.dtype}")
+        #print(f"Converting tensor: {name} => {model_type}: {gguf_name} | type: {tensor.dtype}")
 
         # 根据模型类型选择相应的GGUF写入器
         if model_type == "text":

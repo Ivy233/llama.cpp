@@ -2907,7 +2907,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
         
         // 打印节点名字和基本信息
-        if(node_n < 180){
+        if(node_n < 50){
             printf("=== Node %d: %s ===\n", node_n, node->name ? node->name : "unnamed");
             printf("Node operation: %s\n", ggml_op_name(node->op));
             
@@ -2929,7 +2929,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         ggml_compute_forward(&params, node);
         
         // 打印输出tensor的值
-        if(node_n < 180){
+        if(node_n < 50){
             debug_print_tensor_values(node, "OUTPUT", node->name ? node->name : "unnamed");
             printf("=== End Node %d ===\n\n", node_n);
             fflush(stdout);
