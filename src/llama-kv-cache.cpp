@@ -521,7 +521,10 @@ ggml_tensor * llama_kv_cache_unified::get_v(ggml_context * ctx, int32_t il) cons
     const int32_t ikv = map_layer_ids.at(il);
 
     auto * v = layers[ikv].v;
-
+    printf("llama_kv_cache_unified::get_v v_trans: %d\n", v_trans);
+    printf("hparams.n_embd_head_v: %d, hparams.n_head_kv(il): %d, n: %d\n", hparams.n_embd_head_v, hparams.n_head_kv(il), n);
+    printf("hparams.n_embd_v_gqa(il): %d\n", hparams.n_embd_v_gqa(il));
+    printf("v->type: %d\n", v->type);
     if (!v_trans) {
         // note: v->nb[1] <= v->nb[2]
         return ggml_view_3d(ctx, v,
@@ -616,7 +619,10 @@ void llama_kv_cache_unified::set_input_kq_mask(ggml_tensor * dst, const llama_ub
     float * data = (float *) dst->data;
 
     const int64_t n_kv = n;
-
+    printf("dst shape: %d, %d, %d\n", dst->ne[0], dst->ne[1], dst->ne[2]);
+    printf("n_seqs: %d\n", ubatch->n_seqs);
+    printf("n_seq_tokens: %d\n", ubatch->n_seq_tokens);
+    printf("n_tokens: %d\n", ubatch->n_tokens);
     // Use only the previous KV cells of the correct sequence for each token of the ubatch.
     // It's assumed that if a token in the batch has multiple sequences, they are equivalent.
     // Example with a cache of 10 tokens, 2 tokens populated in cache and 3 tokens in batch:
@@ -663,7 +669,7 @@ void llama_kv_cache_unified::set_input_kq_mask(ggml_tensor * dst, const llama_ub
                     if (masked) {
                         f = -INFINITY;
                     }
-
+                    printf("assign causal mask data : %f to index: %d\n", f, h*(n_kv*n_tokens) + s*(n_kv*n_seq_tokens) + j*n_kv + i);
                     data[h*(n_kv*n_tokens) + s*(n_kv*n_seq_tokens) + j*n_kv + i] = f;
                 }
             }

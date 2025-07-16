@@ -49,6 +49,7 @@ def calculate_differences(arr1, arr2):
     
     # ✅ Fixed: Correct interval statistics with proper ranges
     num_exact = np.sum(abs_diff == 0)
+    num_0_to_1e6 = np.sum((abs_diff > 0) & (abs_diff < 1e-6)) # The missing bin
     num_1e6_to_1e5 = np.sum((abs_diff >= 1e-6) & (abs_diff < 1e-5))
     num_1e5_to_1e4 = np.sum((abs_diff >= 1e-5) & (abs_diff < 1e-4))
     num_1e4_to_1e3 = np.sum((abs_diff >= 1e-4) & (abs_diff < 1e-3))
@@ -57,9 +58,14 @@ def calculate_differences(arr1, arr2):
     num_above_1e1 = np.sum(abs_diff >= 1e-1)
     
     # Verify total
-    total_elements = (num_exact + num_1e6_to_1e5 + num_1e5_to_1e4 + 
+    total_elements = (num_exact + num_0_to_1e6 + num_1e6_to_1e5 + num_1e5_to_1e4 +
                      num_1e4_to_1e3 + num_1e3_to_1e2 + num_1e2_to_1e1 + num_above_1e1)
-    assert total_elements == len(arr1), f"Statistics don't add up: {total_elements} != {len(arr1)}"
+    if total_elements != len(arr1):
+        # Provide more debug info if assertion fails
+        print(f"Warning: Statistics don't add up: {total_elements} != {len(arr1)}")
+        uncounted = len(arr1) - total_elements
+        print(f"There are {uncounted} uncounted elements.")
+
     
     # Statistics
     stats = {
@@ -75,37 +81,41 @@ def calculate_differences(arr1, arr2):
         'significant_median_rel_diff': np.median(significant_rel_diff) * 100 if len(significant_rel_diff) > 0 else 0,
         # ✅ Fixed statistics with proper ranges
         'num_exact_matches': num_exact,
+        'num_0_to_1e6': num_0_to_1e6,
         'num_1e6_to_1e5': num_1e6_to_1e5,
         'num_1e5_to_1e4': num_1e5_to_1e4,
         'num_1e4_to_1e3': num_1e4_to_1e3,
         'num_1e3_to_1e2': num_1e3_to_1e2,
         'num_1e2_to_1e1': num_1e2_to_1e1,
         'num_above_1e1': num_above_1e1,
-        # Keep cumulative for backward compatibility
-        'num_close_matches_1e6': num_exact,
-        'num_close_matches_1e5': num_exact + num_1e6_to_1e5,
-        'num_close_matches_1e4': num_exact + num_1e6_to_1e5 + num_1e5_to_1e4,
-        'num_close_matches_1e3': num_exact + num_1e6_to_1e5 + num_1e5_to_1e4 + num_1e4_to_1e3,
+        # Keep cumulative for backward compatibility, now corrected
+        'num_close_matches_1e6': np.sum(abs_diff < 1e-6),
+        'num_close_matches_1e5': np.sum(abs_diff < 1e-5),
+        'num_close_matches_1e4': np.sum(abs_diff < 1e-4),
+        'num_close_matches_1e3': np.sum(abs_diff < 1e-3),
     }
     
     return stats, abs_diff, rel_diff
 
-def find_file_pairs():
-    """Find file pairs in current directory and subdirectories"""
-    current_dir = os.getcwd()
-    
-    # ✅ Modified: Search in current directory and subdirectories
-    all_dirs = [current_dir] + [d for d in os.listdir(current_dir) if os.path.isdir(os.path.join(current_dir, d))]
-    
+def find_file_pairs(search_path=None):
+    """Find file pairs in specified directory or current directory and subdirectories"""
+    if search_path:
+        if not os.path.isdir(search_path):
+            print(f"Error: Provided search path '{search_path}' is not a valid directory.")
+            return []
+        all_dirs = [search_path]
+        current_dir = os.path.abspath(search_path)
+    else:
+        current_dir = os.getcwd()
+        all_dirs = [current_dir] + [d for d in os.listdir(current_dir) if os.path.isdir(os.path.join(current_dir, d))]
+
     all_pairs = []
-    
-    for search_dir in all_dirs:
-        search_path = os.path.join(current_dir, search_dir) if search_dir != current_dir else current_dir
-        
+
+    for dir_path in all_dirs:
         # Find cpp and py files in this directory
-        cpp_files = glob.glob(os.path.join(search_path, "cpp_*_embd.txt"))
-        py_files = glob.glob(os.path.join(search_path, "py_*_embd.txt"))
-        
+        cpp_files = glob.glob(os.path.join(dir_path, "cpp_*_embd.txt"))
+        py_files = glob.glob(os.path.join(dir_path, "py_*_embd.txt"))
+
         # Extract format types
         cpp_formats = {}
         for cpp_file in cpp_files:
@@ -125,7 +135,7 @@ def find_file_pairs():
         for format_type in cpp_formats:
             if format_type in py_formats:
                 # ✅ Modified: Include directory information
-                dir_name = os.path.basename(search_path) if search_path != current_dir else "root"
+                dir_name = os.path.basename(dir_path) if dir_path != current_dir else "root"
                 all_pairs.append({
                     'format': format_type,
                     'directory': dir_name,
@@ -162,6 +172,9 @@ def compare_embeddings(file1, file2, format_type="", directory=""):
     # Read data
     emb1 = read_embedding_file(file1)
     emb2 = read_embedding_file(file2)
+    
+    print(f'len of emb1: {len(emb1)}')
+    print(f'len of emb2: {len(emb2)}')
     
     if emb1 is None or emb2 is None:
         print("Cannot read files, exiting comparison")
@@ -202,6 +215,7 @@ def compare_embeddings(file1, file2, format_type="", directory=""):
     
     print("Closeness statistics (by intervals):")
     print(f"  Exact matches (diff = 0): {stats['num_exact_matches']} ({stats['num_exact_matches']/stats['length']*100:.2f}%)")
+    print(f"  Difference 0 to 1e-6:   {stats['num_0_to_1e6']} ({stats['num_0_to_1e6']/stats['length']*100:.2f}%)")
     print(f"  Difference 1e-6 to 1e-5: {stats['num_1e6_to_1e5']} ({stats['num_1e6_to_1e5']/stats['length']*100:.2f}%)")
     print(f"  Difference 1e-5 to 1e-4: {stats['num_1e5_to_1e4']} ({stats['num_1e5_to_1e4']/stats['length']*100:.2f}%)")
     print(f"  Difference 1e-4 to 1e-3: {stats['num_1e4_to_1e3']} ({stats['num_1e4_to_1e3']/stats['length']*100:.2f}%)")
@@ -242,10 +256,15 @@ def compare_embeddings(file1, file2, format_type="", directory=""):
 
 def main():
     """Main function: automatically detect and compare all file pairs"""
-    print("🔍 Scanning for embedding file pairs in current directory and subdirectories...\n")
-    
+    if len(sys.argv) > 1 and os.path.isdir(sys.argv[1]):
+        search_path = sys.argv[1]
+        print(f"🔍 Scanning for embedding file pairs in specified directory: {search_path}...\n")
+    else:
+        search_path = None
+        print("🔍 Scanning for embedding file pairs in current directory and subdirectories...\n")
+
     # Find file pairs
-    pairs = find_file_pairs()
+    pairs = find_file_pairs(search_path)
     
     if not pairs:
         print("❌ No matching file pairs found!")
@@ -271,15 +290,11 @@ def main():
 
 if __name__ == "__main__":
     # Support command line arguments (backward compatibility)
-    if len(sys.argv) >= 3:
+    if len(sys.argv) >= 3 and not os.path.isdir(sys.argv[1]):
         # Manually specify files
         llama_cpp_file = sys.argv[1]
         python_file = sys.argv[2]
         compare_embeddings(llama_cpp_file, python_file)
-    elif len(sys.argv) == 2:
-        # Only specify Python file
-        python_file = sys.argv[1]
-        print("Please specify both files for comparison")
     else:
-        # Automatically detect all file pairs
+        # Automatically detect all file pairs, with optional search path
         main()

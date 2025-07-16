@@ -310,6 +310,13 @@ void llm_graph_input_cross_embd::set_input(const llama_ubatch * ubatch) {
 }
 
 void llm_graph_input_attn_no_cache::set_input(const llama_ubatch * ubatch) {
+    printf("kq_mask: %p\n", kq_mask);
+    printf("kq_mask shape: %d, %d, %d\n", kq_mask->ne[0], kq_mask->ne[1], kq_mask->ne[2]);
+    printf("cparams.causal_attn: %d\n", cparams.causal_attn);
+    printf("n_seqs: %d\n", ubatch->n_seqs);
+    printf("n_seq_tokens: %d\n", ubatch->n_seq_tokens);
+    printf("n_tokens: %d\n", ubatch->n_tokens);
+
     if (kq_mask) {
         if (cparams.causal_attn) {
             const int64_t n_kv         = ubatch->n_tokens;
@@ -331,7 +338,7 @@ void llm_graph_input_attn_no_cache::set_input(const llama_ubatch * ubatch) {
                             for (int i = 0; i < n_seq_tokens; ++i) {
                                 const int32_t ti = s0*n_seq_tokens + i;
                                 float f = -INFINITY;
-
+                                printf("s0: %d, ubatch->n_seq_id[s0]: %d\n", s0, ubatch->n_seq_id[s0]);
                                 for (int s = 0; s < ubatch->n_seq_id[s0]; ++s) {
                                     if (ubatch->seq_id[s0][s] == seq_id && ubatch->pos[ti] <= ubatch->pos[tj]) {
                                         if (hparams.use_alibi) {
@@ -342,7 +349,8 @@ void llm_graph_input_attn_no_cache::set_input(const llama_ubatch * ubatch) {
                                         break;
                                     }
                                 }
-
+                                auto index = h*(n_kv*n_tokens) + tj*n_kv + ti;
+                                printf("assign f: %f to index: %d\n", data[index], index);
                                 data[h*(n_kv*n_tokens) + tj*n_kv + ti] = f;
                             }
                         }
@@ -888,10 +896,10 @@ ggml_tensor * llm_graph_context::build_inp_embd(ggml_tensor * tok_embd) const {
     auto inp = std::make_unique<llm_graph_input_embd>();
 
     ggml_tensor * cur = nullptr;
-
+    printf("batch.n_tokens: %d\n", ubatch.n_tokens);
     if (ubatch.token) {
         inp->tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, ubatch.n_tokens);
-        //cb(inp->tokens, "inp_tokens", -1);
+        cb(inp->tokens, "inp_tokens", -1);
         ggml_set_input(inp->tokens);
         res->t_tokens = inp->tokens;
 
@@ -1113,11 +1121,13 @@ ggml_tensor * llm_graph_context::build_attn_mha(
          ggml_tensor * v_mla,
              float     kq_scale) const {
     const bool v_trans = v->nb[1] > v->nb[2];
-
+    //printf("v->nb[1]: %d, v->nb[2]: %d\n", v->nb[1], v->nb[2]);
+    //printf("v_trans: %d\n", v_trans);
+    //printf("enter build_attn_mha v shape: %d, %d, %d, %d\n", v->ne[0], v->ne[1], v->ne[2], v->ne[3]);
     q = ggml_permute(ctx0, q, 0, 2, 1, 3);
     k = ggml_permute(ctx0, k, 0, 2, 1, 3);
     v = ggml_permute(ctx0, v, 0, 2, 1, 3);
-
+    //printf("after build_attn_mha v shape: %d, %d, %d, %d\n", v->ne[0], v->ne[1], v->ne[2], v->ne[3]);
     const auto n_tokens = q->ne[1];
     const auto n_head   = q->ne[2];
     const auto n_kv     = k->ne[1];
@@ -1165,7 +1175,9 @@ ggml_tensor * llm_graph_context::build_attn_mha(
         cur = ggml_reshape_2d(ctx0, cur, cur->ne[0]*n_head, n_tokens);
     } else {
         ggml_tensor * kq = ggml_mul_mat(ctx0, k, q);
-
+        //printf("q: shape=%d, %d, %d, %d\n", q->ne[0], q->ne[1], q->ne[2], q->ne[3]);
+        //printf("k: shape=%d, %d, %d, %d\n", k->ne[0], k->ne[1], k->ne[2], k->ne[3]);
+        //printf("kq: shape=%d, %d, %d, %d\n", kq->ne[0], kq->ne[1], kq->ne[2], kq->ne[3]);
         // note: this op tends to require high floating point range
         //       while for some models F16 is enough, for others it is not, so we default to F32 here
         ggml_mul_mat_set_prec(kq, GGML_PREC_F32);
@@ -1190,15 +1202,21 @@ ggml_tensor * llm_graph_context::build_attn_mha(
         if (kq_b) {
             kq = ggml_add(ctx0, kq, kq_b);
         }
-
+        
+        //printf("kq: shape=%d, %d, %d, %d\n", kq->ne[0], kq->ne[1], kq->ne[2], kq->ne[3]);
+        //printf("kq_mask shape: %d,%d,%d,%d\n", kq_mask->ne[0], kq_mask->ne[1], kq_mask->ne[2], kq_mask->ne[3]);
+        
+        //printf("hparams.f_max_alibi_bias: %f\n", hparams.f_max_alibi_bias);
+        //printf("kq_scale: %f\n", kq_scale);
+        
         kq = ggml_soft_max_ext(ctx0, kq, kq_mask, kq_scale, hparams.f_max_alibi_bias);
-
         if (!v_trans) {
             // note: avoid this branch
             v = ggml_cont(ctx0, ggml_transpose(ctx0, v));
         }
-
+        //printf("before ggml_mul_mat v: shape=%d, %d, %d, %d\n", v->ne[0], v->ne[1], v->ne[2], v->ne[3]);
         ggml_tensor * kqv = ggml_mul_mat(ctx0, v, kq);
+        //printf("%d\n",1/0);
 
         // for MLA with the absorption optimization, we need to "decompress" from MQA back to MHA
         if (v_mla) {
@@ -1246,7 +1264,8 @@ ggml_tensor * llm_graph_context::build_attn(
             float     kq_scale,
             int       il) const {
     GGML_UNUSED(n_tokens);
-
+    printf("enter llm_graph_input_attn_no_cache build_attn, v_cur shape: %d, %d, %d\n", v_cur->ne[0], v_cur->ne[1], v_cur->ne[2]);
+    printf("enter llm_graph_input_attn_no_cache build_attn, v_cur nb[1]: %d, nb[2]: %d\n", v_cur->nb[1], v_cur->nb[2]);
     // these nodes are added to the graph together so that they are not reordered
     // by doing so, the number of splits in the graph is reduced
     ggml_build_forward_expand(gf, q_cur);
@@ -1272,6 +1291,7 @@ ggml_tensor * llm_graph_context::build_attn(
 
     if (wo_b) {
         cur = ggml_add(ctx0, cur, wo_b);
+        cb(cur, "attn_added_kqv_out", il);
     }
 
     return cur;
@@ -1309,6 +1329,8 @@ ggml_tensor * llm_graph_context::build_attn(
         ggml_tensor * v_mla,
             float     kq_scale,
             int       il) const {
+    
+    printf("enter build_attn, v_cur shape: %d, %d, %d\n", v_cur->ne[0], v_cur->ne[1], v_cur->ne[2]);
     // these nodes are added to the graph together so that they are not reordered
     // by doing so, the number of splits in the graph is reduced
     ggml_build_forward_expand(gf, q_cur);

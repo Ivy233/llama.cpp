@@ -20,7 +20,6 @@
 #include <regex>
 #include <sstream>
 #include <stdexcept>
-
 const char * llm_type_name(llm_type type) {
     switch (type) {
         case LLM_TYPE_14M:           return "14M";
@@ -6146,6 +6145,8 @@ struct llm_build_bert : public llm_graph_context {
     }
 };
 
+
+
 struct llm_build_cliptext : public llm_graph_context {
     llm_build_cliptext(const llama_model & model, const llm_graph_params & params, ggml_cgraph * gf): llm_graph_context(params) {
         const int64_t n_embd_head = hparams.n_hidden_size / n_head;
@@ -6153,8 +6154,9 @@ struct llm_build_cliptext : public llm_graph_context {
         // construct input embeddings (token, type, position)
         ggml_tensor * inpL = build_inp_embd(model.tok_embd);
         ggml_tensor * inp_pos = build_inp_pos();
+        cb(inp_pos, "inp_pos", -1);
         inpL = ggml_add(ctx0, inpL, ggml_get_rows(ctx0, model.pos_embd, inp_pos));
-
+        cb(inpL, "added_inpl", -1);
         auto * inp_attn = build_attn_inp_no_cache();
         // iterate layers
         for (int il = 0; il < n_layer; ++il) {
@@ -6168,50 +6170,88 @@ struct llm_build_cliptext : public llm_graph_context {
 
             // self-attention
             ggml_tensor * Qcur = ggml_add(ctx0, build_lora_mm(model.layers[il].wq, cur), model.layers[il].bq);
-            ggml_tensor * Kcur = ggml_add(ctx0, build_lora_mm(model.layers[il].wk, cur), model.layers[il].bk);
-            ggml_tensor * Vcur = ggml_add(ctx0, build_lora_mm(model.layers[il].wv, cur), model.layers[il].bv);
-
-            Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head,    n_tokens);
-            Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
-            Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
+            cb(Qcur, "Qcur_origin", il);
+            Qcur = ggml_scale_inplace(ctx0, Qcur, 1.0f / sqrt((float)n_embd_head));
+            Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head, n_tokens);
+            //64, 12, 2, 1
+            //Qcur = ggml_cont(ctx0, ggml_permute(ctx0, Qcur, 0, 2, 1, 3));
             cb(Qcur, "Qcur", il);
+
+            ggml_tensor * Kcur = ggml_add(ctx0, build_lora_mm(model.layers[il].wk, cur), model.layers[il].bk);
+            Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head, n_tokens);
+            //Kcur = ggml_cont(ctx0, ggml_permute(ctx0, Kcur, 0, 2, 1, 3));
             cb(Kcur, "Kcur", il);
-            cb(Vcur, "Vcur", il);
+
+            ggml_tensor * Vcur = ggml_add(ctx0, build_lora_mm(model.layers[il].wv, cur), model.layers[il].bv);
+            //Vcur = ggml_reshape_4d(ctx0, Vcur, n_head, n_embd_head, n_tokens, 1);
+            //cb(Vcur, "Vcur", il);
+            //Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head,    n_tokens);
+            //Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
+            //Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
+            bool debug = true;
+            if(!debug){
+                Vcur = ggml_cont(ctx0, ggml_permute(ctx0, Vcur, 0, 2, 1, 3));
+            } else {
+                //Vcur = ggml_cont(ctx0, ggml_permute(ctx0, Vcur, 1, 2, 0, 3));
+                //V = ggml_cont(ctx0, ggml_permute(ctx0, V, 3, 1, 2, 0));
+                //cb(Vcur, "Vcur-contted", il);
+                Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head,  n_head,n_tokens );
+            }
 
             cur = build_attn(inp_attn, gf,
                     model.layers[il].wo, model.layers[il].bo,
-                    Qcur, Kcur, Vcur, nullptr, nullptr, 1.0f/sqrtf(float(n_embd)), il);
+                    Qcur, Kcur, Vcur, nullptr, nullptr, 1.0, il);
             cb(cur, "kqv_out", il);
 
-            cur = ggml_add(ctx0, cur, inpL);
+            ggml_tensor * ffn_inp  = ggml_add(ctx0, cur, inpL);
+            cb(ffn_inp, "ffn_inp", il);
+
 
             // norm2
-            inpL = cur;
-            cur = build_norm(cur, model.layers[il].attn_norm_2, model.layers[il].attn_norm_2_b, LLM_NORM, il);
+            cur = build_norm(ffn_inp, model.layers[il].attn_norm_2, model.layers[il].attn_norm_2_b, LLM_NORM, il);
+            cb(ffn_inp, "ffn_norm", il);
+
+            
             // MLP
-            ggml_tensor * ffn_inp = cur;
-            cb(ffn_inp, "ffn_inp", il);
             cur = build_ffn(cur,
                 model.layers[il].ffn_up,   model.layers[il].ffn_up_b,   NULL,
                 NULL,                      NULL,                        NULL,
                 model.layers[il].ffn_down, model.layers[il].ffn_down_b, NULL,
                 NULL,
-                LLM_FFN_GELU, LLM_FFN_SEQ, il);
+                LLM_FFN_QUICK_GELU, LLM_FFN_SEQ, il);
             cb(cur, "ffn_out", il);
             // add
             cur = ggml_add(ctx0, cur, ffn_inp);
+            cb(cur, "ffn_out_added", il);
             // input for next layer
             inpL = cur;
         }
+        
+        //cur = inpL;
+        const int64_t n_embd   = inpL->ne[0];
+        const int64_t n_tokens = inpL->ne[1];
+        cur = ggml_view_2d(ctx0, inpL, n_embd, 1, inpL->nb[1], (n_tokens - 1) * inpL->nb[1]);
+        cur = build_norm(cur, model.output_norm, model.output_norm_b, LLM_NORM, -1);
+        cb(cur, "result_norm", -1);
+        cur = ggml_mul_mat(ctx0, model.projection, cur);
+        cb(cur, "result_embd", -1);
+        
+        res->t_embd = cur;
+        printf("res->t_embd: %s  shape: %ld %ld %ld %ld %d\n", res->t_embd->name, res->t_embd->ne[0], res->t_embd->ne[1], res->t_embd->ne[2], res->t_embd->ne[3], res->t_embd->type);
 
-        cur = inpL;
+        ggml_build_forward_expand(gf, cur);
+        
+        printf("gf nodes : %d\n", ggml_graph_n_nodes(gf));
+
+
+        /*cur = inpL;
         cur = ggml_mul_mat(ctx0, model.projection, cur);
         // cur = ggml_mul_mat(ctx0, inpl);
 
         cb(cur, "result_embd", -1);
         res->t_embd = cur;
 
-        ggml_build_forward_expand(gf, cur);
+        ggml_build_forward_expand(gf, cur);*/
 
     }
 };
@@ -6939,7 +6979,7 @@ struct llm_build_qwen2 : public llm_graph_context {
                 Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head,    n_tokens);
                 Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
                 Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
-
+                printf("after reshape in compute graph, vcur shape: %d, %d, %d\n", Vcur->ne[0], Vcur->ne[1], Vcur->ne[2]);
                 Qcur = ggml_rope_ext(
                         ctx0, Qcur, inp_pos, nullptr,
                         n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
@@ -11053,7 +11093,8 @@ struct llm_build_t5_enc : public llm_graph_context {
                 Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head,    n_tokens);
                 Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
                 Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
-
+                
+                printf("Vcur shape in compute graph: %d, %d, %d, %d\n", Vcur->ne[0], Vcur->ne[1], Vcur->ne[2], Vcur->ne[3]);
                 ggml_tensor * attn_rel_b = model.layers[il].attn_rel_b_enc ? model.layers[il].attn_rel_b_enc : model.layers[0].attn_rel_b_enc;
                 ggml_tensor * kq_b = build_pos_bias(pos_bucket_enc, attn_rel_b);
 
@@ -13590,6 +13631,7 @@ llm_graph_result_ptr llama_model::build_graph(
                    ggml_cgraph * gf,
                 llm_graph_type   type) const {
     std::unique_ptr<llm_graph_context> llm;
+    
     switch (arch) {
         case LLM_ARCH_LLAMA:
         case LLM_ARCH_MINICPM:
@@ -14119,6 +14161,8 @@ bool llama_model_has_encoder(const llama_model * model) {
     switch (model->arch) {
         case LLM_ARCH_T5:        return true;
         case LLM_ARCH_T5ENCODER: return true;
+        case LLM_ARCH_BGEVL_TEXT:    return true;
+        case LLM_ARCH_BGEVL_VISION:  return true;
         default:                 return false;
     }
 }
@@ -14126,6 +14170,8 @@ bool llama_model_has_encoder(const llama_model * model) {
 bool llama_model_has_decoder(const llama_model * model) {
     switch (model->arch) {
         case LLM_ARCH_T5ENCODER: return false;
+        case LLM_ARCH_BGEVL_TEXT:    return false;
+        case LLM_ARCH_BGEVL_VISION:  return false;
         default:                 return true;
     }
 }

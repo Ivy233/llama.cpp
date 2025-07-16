@@ -12,8 +12,9 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
-#include <fstream>  
-#include <iomanip> 
+#include <fstream>
+#include <iomanip>
+#include <cstdlib>
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -379,6 +380,40 @@ std::string get_file_extension(const std::string& filename) {
     return "";
 }
 
+void save_embedding_to_file(const float* emb, int n_embd, const std::string & suffix, const std::string& image_path="") {
+    const char* out_dir_env = std::getenv("OUT_DIR");
+    if (!out_dir_env) {
+        LOG_WRN("OUT_DIR environment variable not set. Not saving embedding to file.\n");
+        return;
+    }
+
+    std::string out_dir(out_dir_env);
+    std::string ext = "";
+    if(strcmp(suffix.c_str(), "img") == 0){
+        ext = get_file_extension(image_path);
+    }else{
+        ext = suffix;
+    }
+
+    printf("ext: %s\n", ext.c_str());
+    std::string output_filename = out_dir + "/cpp_" + ext + "_embd.txt";
+
+    std::ofstream outfile(output_filename);
+    if (outfile.is_open()) {
+        for (int i = 0; i < n_embd; i++) {
+            outfile << std::fixed << std::setprecision(6) << emb[i];
+            if (i < n_embd - 1) {
+                outfile << " ";
+            }
+        }
+        outfile << std::endl;
+        outfile.close();
+        printf("\nEmbedding已保存到: %s\n", output_filename.c_str());
+    } else {
+        printf("\n错误：无法创建文件 %s\n", output_filename.c_str());
+    }
+}
+
 int main(int argc, char ** argv) {
     common_params params;
 
@@ -471,7 +506,14 @@ int main(int argc, char ** argv) {
             }
             inputs.push_back(inp);
         }
-
+        
+        for(auto inp : inputs){
+            for(auto token : inp){
+                printf("%d ", token);
+            }
+            printf("\n");
+        }
+        exit(0);
         // check if the last token is SEP
         // it should be automatically added by the tokenizer when 'tokenizer.ggml.add_eos_token' is set to 'true'
         for (auto & inp : inputs) {
@@ -554,30 +596,7 @@ int main(int argc, char ** argv) {
                 }
             }
             
-            std::string ext = get_file_extension(params.image[0]);
-            printf("ext: %s\n", ext.c_str());
-            std::string output_filename;
-     
-            output_filename = "/root/compare/cpp_" + ext + "_embd.txt";
-            
-            std::ofstream outfile(output_filename);
-            if (outfile.is_open()) {
-                for (int i = 0; i < n_embd; i++) {
-                    if (params.embd_normalize == 0) {
-                        LOG("%6.0f ", emb[i]);
-                        outfile << std::fixed << std::setprecision(6) << emb[i];
-                    } else {
-                        LOG("%9.6f ", emb[i]);
-                        outfile << std::fixed << std::setprecision(6) << emb[i];
-                    }
-                    if (i < n_embd - 1) outfile << " ";
-                }
-                outfile << std::endl;
-                outfile.close();
-                printf("\nEmbedding已保存到: %s\n", output_filename.c_str());
-            } else {
-                printf("\n错误：无法创建文件 %s\n", output_filename.c_str());
-            }
+            save_embedding_to_file(emb, n_embd, "img", params.image[0]);
 
             LOG("\n");
         } else if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
@@ -606,6 +625,7 @@ int main(int argc, char ** argv) {
                 LOG("rerank score %d: %8.3f\n", j, emb[j * n_embd]);
             }
         } else {
+            save_embedding_to_file(emb, n_embd, "text");
             // print the first part of the embeddings or for a single prompt, the full embedding
             int n_prompts = is_image ? 1 : n_embd_count;
             for (int j = 0; j < n_prompts; j++) {
@@ -619,24 +639,8 @@ int main(int argc, char ** argv) {
                 }
                 LOG("\n");
             }
-
-            // print cosine similarity matrix
-            if (n_prompts > 1) {
-                LOG("\n");
-                LOG("cosine similarity matrix:\n\n");
-                for (int i = 0; i < n_prompts; i++) {
-                    LOG("%6.6s ", "");  // Placeholder for image or text label
-                }
-                LOG("\n");
-                for (int i = 0; i < n_prompts; i++) {
-                    for (int j = 0; j < n_prompts; j++) {
-                        float sim = common_embd_similarity_cos(emb + i * n_embd, emb + j * n_embd, n_embd);
-                        LOG("%6.2f ", sim);
-                    }
-                    LOG("%1.10s", "");  // Placeholder for image or text label
-                    LOG("\n");
-                }
-            }
+            printf("end......\n");
+           
         }
     }
 

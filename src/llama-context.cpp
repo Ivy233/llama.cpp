@@ -754,7 +754,15 @@ int llama_context::encode(llama_batch & inp_batch) {
     // always use non-causal attention for encoder graphs
     // TODO: this is a tmp solution until we have a proper way to support enc-dec models
     //       ref: https://github.com/ggml-org/llama.cpp/pull/12181#issuecomment-2730451223
-    cparams.causal_attn = false;
+    // TODO bge-vl text encode use causal mask.
+    // https://huggingface.co/BAAI/BGE-VL-large/blob/main/modeling_MMRet_CLIP.py#L889
+    
+    // 对于BGE-VL文本模型，使用因果注意力
+    if (model.arch == LLM_ARCH_BGEVL_TEXT) {
+        cparams.causal_attn = true;
+    } else {
+        cparams.causal_attn = false;
+    }
 
     auto * gf = graph_init();
     auto res = graph_build(ctx_compute.get(), gf, ubatch, LLM_GRAPH_TYPE_ENCODER);
@@ -766,16 +774,6 @@ int llama_context::encode(llama_batch & inp_batch) {
     cparams.causal_attn = causal_attn_org;
 
     const auto compute_status = graph_compute(gf, n_tokens > 1);
-    ggml_tensor* input_embeds = ggml_graph_get_tensor(gf, "input_embeds");
-    ggml_tensor* patch_embeds = ggml_graph_get_tensor(gf, "patch_embeds");
-
-    if (input_embeds->data) {
-        for(int index = 0; index < 10; index++){
-            printf("input_embeds: %d %f\n", index, (((float*)input_embeds->data)[index]));
-        }
-    }
-    else { printf("input_embeds is None\n"); }
-    
 
     switch (compute_status) {
         case GGML_STATUS_SUCCESS:
@@ -974,7 +972,6 @@ int llama_context::decode(llama_batch & inp_batch) {
         llama_ubatch ubatch = kv_self->ubatch_next(sbatch, cparams.n_ubatch, embd_pooled);
         printf("sbatch.n_tokens: %d\n", sbatch.n_tokens);
         printf("ubatch.n_tokens: %d\n", ubatch.n_tokens);
-        printf("%d\n",1/0);
         // count the outputs in this u_batch
         {
             int32_t n_outputs_new = 0;
