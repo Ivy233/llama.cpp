@@ -433,6 +433,7 @@ struct llm_tokenizer_bpe : llm_tokenizer {
                     "\\p{N}+",
                     "[0-9][0-9][0-9]",
                 };
+                
                 break;
         }
     }
@@ -482,22 +483,165 @@ struct llm_tokenizer_bpe_session {
     }
 
     void tokenize(const std::string & text, std::vector<llama_token> & output) {
-        // GGML_LOG_DEBUG("bpe tokenize: '%s'", text.c_str());
         int final_prev_index = -1;
         const auto word_collection = unicode_regex_split(text, tokenizer.regex_exprs);
+
+        symbols_final.clear();
+
+        for (const auto & word : word_collection) {
+            work_queue = llm_bigram_bpe::queue();
+            symbols.clear();
+
+            int index = 0;
+            size_t offset = 0;
+
+            //if (vocab.tokenizer_ignore_merges && vocab.token_to_id.find(word) != vocab.token_to_id.end()) {
+            if (vocab.get_ignore_merges() && vocab.text_to_token(word) != LLAMA_TOKEN_NULL) {
+                symbols.emplace_back(llm_symbol{-1, -1, word.c_str(), word.size()});
+                offset = word.size();
+            }
+
+            while (offset < word.size()) {
+                llm_symbol sym;
+                size_t char_len = std::min(word.size() - offset, (size_t) unicode_len_utf8(word[offset]));
+                sym.text = word.c_str() + offset;
+                sym.n = char_len;
+                offset += sym.n;
+                sym.prev = index - 1;
+                sym.next = offset == word.size() ? -1 : index + 1;
+                index++;
+                symbols.emplace_back(sym);
+            }
+            for (int i = 1; i < (int) symbols.size(); ++i) {
+                add_new_bigram(i - 1, i);
+            }
+
+            // build token(s)
+            while (!work_queue.empty()) {
+                auto bigram = work_queue.pop_move();
+
+                auto & left_symbol = symbols[bigram.left];
+                auto & right_symbol = symbols[bigram.right];
+
+                if (left_symbol.n == 0 || right_symbol.n == 0) {
+                    continue;
+                }
+                std::string left_token = std::string(left_symbol.text, left_symbol.n);
+                std::string right_token = std::string(right_symbol.text, right_symbol.n);
+                if (left_token + right_token != bigram.text) {
+                    continue;  // Skip this bigram if it's outdated
+                }
+
+                // merge the right sym into the left one
+                left_symbol.n += right_symbol.n;
+                right_symbol.n = 0;
+
+                // remove the right sym from the chain
+                left_symbol.next = right_symbol.next;
+                if (right_symbol.next >= 0) {
+                    symbols[right_symbol.next].prev = bigram.left;
+                }
+
+                add_new_bigram(left_symbol.prev, bigram.left);  // left side of current symbol
+                add_new_bigram(bigram.left, left_symbol.next);  // right side of current symbol
+            }
+
+            // add the finished tokens to the final list keeping correct order for next and prev
+            for (auto & sym : symbols) {
+                if (sym.n > 0) {
+                    sym.prev = final_prev_index;
+                    sym.next = -1;
+                    if (final_prev_index != -1) {
+                        symbols_final[final_prev_index].next = symbols_final.size();
+                    }
+                    symbols_final.emplace_back(sym);
+                    final_prev_index = symbols_final.size() - 1;
+                }
+            }
+        }
+
+        symbols = symbols_final;
+
+        if (!symbols.empty()) {
+            for (int i = 0; i != -1; i = symbols[i].next) {
+                auto & symbol = symbols[i];
+                if (symbol.n == 0) {
+                    continue;
+                }
+
+                const std::string str = std::string(symbol.text, symbol.n);
+                const auto token = vocab.text_to_token(str);
+
+                if (token == LLAMA_TOKEN_NULL) {
+                    for (auto j = str.begin(); j != str.end(); ++j) {
+                        std::string byte_str(1, *j);
+                        auto token_multibyte = vocab.text_to_token(byte_str);
+                        if (token_multibyte != LLAMA_TOKEN_NULL) {
+                            output.push_back(token_multibyte);
+                        }
+                    }
+                } else {
+                    output.push_back(token);
+                }
+            }
+        }
+    }
+
+    void tokenize_clip(const std::string & text, std::vector<llama_token> & output) {
+        // GGML_LOG_DEBUG("bpe tokenize: '%s'", text.c_str());
+        int final_prev_index = -1;
+        
+        const auto word_collection_raw = unicode_regex_split(text, tokenizer.regex_exprs);
+        std::vector<std::string> word_collection;
+
+        // 对unicode_regex_split的结果进行后处理
+        for (const auto& word : word_collection_raw) {
+            if (word.empty()) {
+                continue;
+            }
+
+            size_t start_pos = 0;
+            // 循环去除所有前导的 "Ġ" 或其他类型的空格
+            while (start_pos < word.length()) {
+                // 检查是否是普通的ASCII空格
+                if (isspace(static_cast<unsigned char>(word[start_pos]))) {
+                    start_pos++;
+                    continue;
+                }
+                // 检查是否是"Ġ" (UTF-8: 0xC4 0xA0)
+                if (word.substr(start_pos, 2) == "\xc4\xa0") { // "Ġ"的UTF-8编码
+                    start_pos += 2;
+                    continue;
+                }
+                // 如果不是任何一种空格，就停止扫描
+                        break;
+            }
+
+            // 如果去除前导空格后还有剩余内容，则将其加入到干净的集合中
+            if (start_pos < word.length()) {
+                word_collection.push_back(word.substr(start_pos));
+            }
+        }
 
         symbols_final.clear();
         std::list<std::string> temp_word_storage;
 
         for (const auto & word_ref : word_collection) {
-            std::string word = word_ref;
-            printf("=======> word: %s\n", word.c_str());
-            if (vocab.get_pre_type() == LLAMA_VOCAB_PRE_TYPE_CLIP && !word.empty()) {
+            std::string processed_word = word_ref;
+            printf("=======> word: %s\n", processed_word.c_str());
+            if (vocab.get_pre_type() == LLAMA_VOCAB_PRE_TYPE_CLIP && !processed_word.empty()) {
                 // For CLIP, append '</w>' to the end of the word to match Python tokenization behavior
-                temp_word_storage.push_back(word + "</w>");
-                word = temp_word_storage.back();
-                printf("=======> CLIP处理: 添加</w>后的word: %s\n", word.c_str());
+                // INSERT_YOUR_CODE
+                printf("Characters in processed_word: ");
+                for (size_t i = 0; i < processed_word.size(); ++i) {
+                    printf("char in processed_word: %c ,%d \n", processed_word[i], processed_word[i]);
+                }
+                printf("\n");
+                processed_word += "</w>";
+                printf("=======> CLIP处理: 添加</w>后的word: %s\n", processed_word.c_str());
             }
+            temp_word_storage.push_back(std::move(processed_word));
+            const std::string & word = temp_word_storage.back();
 
             work_queue = llm_bigram_bpe::queue();
             symbols.clear();
@@ -2559,7 +2703,11 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                         LLAMA_LOG_WARN("TT: (%ld %ld %ld) '%s'\n", text.length(), fragment.offset, fragment.length, text.c_str());
 #endif
                         printf("session add raw text : %s\n", text.c_str());
-                        session.tokenize(text, output);
+                        if (vocab.get_pre_type() == LLAMA_VOCAB_PRE_TYPE_CLIP) {
+                            session.tokenize_clip(text, output);
+                        } else {
+                            session.tokenize(text, output);
+                        }
                     } else { // if (fragment.type == FRAGMENT_BUFFER_VARIANT_TYPE_TOKEN)
                         session.append(fragment.token, output);
                     }
@@ -2981,31 +3129,9 @@ llama_token llama_vocab::byte_to_token(uint8_t ch) const {
 llama_token llama_vocab::text_to_token(const std::string & text) const {
     GGML_ASSERT(pimpl->type != LLAMA_VOCAB_TYPE_NONE);
     
-    // 处理CLIP模型中带有</w>的token
-    if (pimpl->pre_type == LLAMA_VOCAB_PRE_TYPE_CLIP) {
-        // 直接查找完整token（包括</w>）
         auto it = pimpl->token_to_id.find(text);
         if (it != pimpl->token_to_id.end()) {
             return (*it).second;
-        }
-        
-        // 检查是否以</w>结尾，尝试去除</w>后查找
-        if (text.size() > 4 && text.substr(text.size() - 4) == "</w>") {
-            const std::string base_text = text.substr(0, text.size() - 4);
-            printf("=======> CLIP处理(text_to_token): 尝试查找无</w>的token: '%s'\n", base_text.c_str());
-            
-            auto base_it = pimpl->token_to_id.find(base_text);
-            if (base_it != pimpl->token_to_id.end()) {
-                printf("=======> CLIP处理(text_to_token): 找到基础token: %d\n", (*base_it).second);
-                return (*base_it).second;
-            }
-        }
-    } else {
-        // 非CLIP模型正常处理
-        auto it = pimpl->token_to_id.find(text);
-        if (it != pimpl->token_to_id.end()) {
-            return (*it).second;
-        }
     }
     
     return LLAMA_TOKEN_NULL;

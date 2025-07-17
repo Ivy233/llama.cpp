@@ -108,14 +108,14 @@ def find_file_pairs(search_path=None):
     else:
         current_dir = os.getcwd()
         all_dirs = [current_dir] + [d for d in os.listdir(current_dir) if os.path.isdir(os.path.join(current_dir, d))]
-
+    
     all_pairs = []
-
+    
     for dir_path in all_dirs:
         # Find cpp and py files in this directory
         cpp_files = glob.glob(os.path.join(dir_path, "cpp_*_embd.txt"))
         py_files = glob.glob(os.path.join(dir_path, "py_*_embd.txt"))
-
+        
         # Extract format types
         cpp_formats = {}
         for cpp_file in cpp_files:
@@ -261,8 +261,8 @@ def main():
         print(f"🔍 Scanning for embedding file pairs in specified directory: {search_path}...\n")
     else:
         search_path = None
-        print("🔍 Scanning for embedding file pairs in current directory and subdirectories...\n")
-
+    print("🔍 Scanning for embedding file pairs in current directory and subdirectories...\n")
+    
     # Find file pairs
     pairs = find_file_pairs(search_path)
     

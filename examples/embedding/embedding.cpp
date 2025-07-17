@@ -14,7 +14,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
-#include <cstdlib>
+#include <cstdlib> // For std::getenv
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -380,35 +380,38 @@ std::string get_file_extension(const std::string& filename) {
     return "";
 }
 
-void save_embedding_to_file(const float* emb, int n_embd, const std::string & suffix, const std::string& image_path="") {
+void save_embedding_to_file(const float * emb, int n_embd, const std::string & type, const std::string & fname_prefix) {
+    // Get suffix from environment variable, default to empty string if not set
+    const char* suffix_env = std::getenv("OUTPUT_SUFFIX");
+    std::string suffix = suffix_env ? std::string(suffix_env) : "";
+
+    // Get output directory from environment variable
     const char* out_dir_env = std::getenv("OUT_DIR");
     if (!out_dir_env) {
-        LOG_WRN("OUT_DIR environment variable not set. Not saving embedding to file.\n");
+        printf("\n错误：环境变量 OUT_DIR 未设置。");
         return;
     }
+    std::string out_dir = out_dir_env;
 
-    std::string out_dir(out_dir_env);
-    std::string ext = "";
-    if(strcmp(suffix.c_str(), "img") == 0){
-        ext = get_file_extension(image_path);
-    }else{
-        ext = suffix;
+    // Construct the full path
+    std::string output_filename;
+    if (type == "img") {
+        std::string ext = get_file_extension(fname_prefix);
+        output_filename = out_dir + "/cpp_" + (suffix.empty() ? ext : suffix) + "_embd.txt";
+    } else { // text
+        output_filename = out_dir + "/cpp_" + (suffix.empty() ? "text" : suffix) + "_embd.txt";
     }
 
-    printf("ext: %s\n", ext.c_str());
-    std::string output_filename = out_dir + "/cpp_" + ext + "_embd.txt";
-
-    std::ofstream outfile(output_filename);
-    if (outfile.is_open()) {
-        for (int i = 0; i < n_embd; i++) {
-            outfile << std::fixed << std::setprecision(6) << emb[i];
-            if (i < n_embd - 1) {
-                outfile << " ";
-            }
+    // Open file and save
+    std::ofstream out_file(output_filename);
+    if (out_file.is_open()) {
+        out_file << std::fixed << std::setprecision(6);
+        for (int i = 0; i < n_embd; ++i) {
+            out_file << emb[i] << (i == n_embd - 1 ? "" : " ");
         }
-        outfile << std::endl;
-        outfile.close();
-        printf("\nEmbedding已保存到: %s\n", output_filename.c_str());
+        out_file << std::endl;
+        out_file.close();
+        printf("C++ 嵌入向量已保存到 %s\n", output_filename.c_str());
     } else {
         printf("\n错误：无法创建文件 %s\n", output_filename.c_str());
     }
@@ -420,6 +423,10 @@ int main(int argc, char ** argv) {
     if (!common_params_parse(argc, argv, params, LLAMA_EXAMPLE_EMBEDDING)) {
         return 1;
     }
+
+    // Get output suffix from environment variable
+    const char* suffix_env = std::getenv("OUTPUT_SUFFIX");
+    std::string output_suffix = (suffix_env != nullptr) ? suffix_env : "";
 
     common_init();
 
@@ -513,7 +520,6 @@ int main(int argc, char ** argv) {
             }
             printf("\n");
         }
-        exit(0);
         // check if the last token is SEP
         // it should be automatically added by the tokenizer when 'tokenizer.ggml.add_eos_token' is set to 'true'
         for (auto & inp : inputs) {
@@ -619,13 +625,8 @@ int main(int argc, char ** argv) {
                 }
                 LOG("\n");
             }
-        } else if (pooling_type == LLAMA_POOLING_TYPE_RANK) {
-            for (int j = 0; j < n_embd_count; j++) {
-                // NOTE: if you change this log - update the tests in ci/run.sh
-                LOG("rerank score %d: %8.3f\n", j, emb[j * n_embd]);
-            }
-        } else {
-            save_embedding_to_file(emb, n_embd, "text");
+        } else { // LLAMA_POOLING_TYPE_CLS || LLAMA_POOLING_TYPE_MEAN
+            save_embedding_to_file(emb, n_embd, "text", output_suffix);
             // print the first part of the embeddings or for a single prompt, the full embedding
             int n_prompts = is_image ? 1 : n_embd_count;
             for (int j = 0; j < n_prompts; j++) {
@@ -640,7 +641,6 @@ int main(int argc, char ** argv) {
                 LOG("\n");
             }
             printf("end......\n");
-           
         }
     }
 
