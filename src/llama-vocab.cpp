@@ -591,7 +591,10 @@ struct llm_tokenizer_bpe_session {
         // GGML_LOG_DEBUG("bpe tokenize: '%s'", text.c_str());
         int final_prev_index = -1;
         
-        const auto word_collection_raw = unicode_regex_split(text, tokenizer.regex_exprs);
+        // Add spaces around CJK characters first
+        const std::string processed_text = unicode_add_spaces_around_cjk(text);
+        printf("=======> processed_text: %s\n", processed_text.c_str());
+        const auto word_collection_raw = unicode_regex_split(processed_text, tokenizer.regex_exprs);
         std::vector<std::string> word_collection;
 
         // 对unicode_regex_split的结果进行后处理
@@ -600,26 +603,32 @@ struct llm_tokenizer_bpe_session {
                 continue;
             }
 
+            // 1. First, strip leading spaces/Ġ from the original word
             size_t start_pos = 0;
-            // 循环去除所有前导的 "Ġ" 或其他类型的空格
             while (start_pos < word.length()) {
-                // 检查是否是普通的ASCII空格
                 if (isspace(static_cast<unsigned char>(word[start_pos]))) {
                     start_pos++;
                     continue;
                 }
-                // 检查是否是"Ġ" (UTF-8: 0xC4 0xA0)
-                if (word.substr(start_pos, 2) == "\xc4\xa0") { // "Ġ"的UTF-8编码
+                // Check for "Ġ" (UTF-8: 0xC4 0xA0)
+                if (word.size() - start_pos >= 2 && word.substr(start_pos, 2) == "\xc4\xa0") {
                     start_pos += 2;
                     continue;
                 }
-                // 如果不是任何一种空格，就停止扫描
-                        break;
+                // If not any kind of space, stop scanning
+                break;
             }
-
-            // 如果去除前导空格后还有剩余内容，则将其加入到干净的集合中
+            
+            // If the word is not entirely made of spaces
             if (start_pos < word.length()) {
-                word_collection.push_back(word.substr(start_pos));
+                // 2. Get the clean substring
+                std::string clean_word = word.substr(start_pos);
+
+                // 3. NOW, convert the clean word to lowercase
+                std::string lower_word = unicode_string_to_lower(clean_word);
+                
+                // 4. Push the final processed word
+                word_collection.push_back(lower_word);
             }
         }
 

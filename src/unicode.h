@@ -63,4 +63,10 @@ uint8_t     unicode_utf8_to_byte(const std::string & utf8);
 
 uint32_t unicode_tolower(uint32_t cpt);
 
+std::string unicode_string_to_lower(const std::string & str);
+
+// new functions for CJK character handling
+bool unicode_is_cjk(uint32_t cpt);
+std::string unicode_add_spaces_around_cjk(const std::string & str);
+
 std::vector<std::string> unicode_regex_split(const std::string & text, const std::vector<std::string> & regex_exprs);

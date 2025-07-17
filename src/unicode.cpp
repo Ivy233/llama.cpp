@@ -667,6 +667,42 @@ uint32_t unicode_tolower(uint32_t cpt) {
     return cpt;  // Return the original code point if no lowercase mapping is found
 }
 
+std::string unicode_string_to_lower(const std::string & str) {
+    std::vector<uint32_t> cpts = unicode_cpts_from_utf8(str);
+    for (size_t i = 0; i < cpts.size(); ++i) {
+        cpts[i] = unicode_tolower(cpts[i]);
+    }
+    return unicode_cpts_to_utf8(cpts);
+}
+
+bool unicode_is_cjk(uint32_t cpt) {
+    return (
+        (cpt >= 0x4E00 && cpt <= 0x9FFF) ||
+        (cpt >= 0x3400 && cpt <= 0x4DBF) ||
+        (cpt >= 0x20000 && cpt <= 0x2A6DF) ||
+        (cpt >= 0x2A700 && cpt <= 0x2B73F) ||
+        (cpt >= 0x2B740 && cpt <= 0x2B81F) ||
+        (cpt >= 0x2B820 && cpt <= 0x2CEAF) ||
+        (cpt >= 0xF900 && cpt <= 0xFAFF) ||
+        (cpt >= 0x2F800 && cpt <= 0x2FA1F)
+    );
+}
+
+std::string unicode_add_spaces_around_cjk(const std::string & str) {
+    std::string result;
+    auto cpts = unicode_cpts_from_utf8(str);
+    for (const auto & cpt : cpts) {
+        if (unicode_is_cjk(cpt)) {
+            result += " ";
+            result += unicode_cpt_to_utf8(cpt);
+            result += " ";
+        } else {
+            result += unicode_cpt_to_utf8(cpt);
+        }
+    }
+    return result;
+}
+
 std::vector<std::string> unicode_regex_split(const std::string & text, const std::vector<std::string> & regex_exprs) {
     // unicode categories
     static const std::map<std::string, int> k_ucat_enum = {

@@ -13,6 +13,7 @@ echo "已清理并创建输出目录。"
 echo "正在编译 C++ embedding 程序..."
 cmake -B build -DGGML_CUDA=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache
 cmake --build build --target llama-embedding -j
+cmake --build build --target llama-tokenize -j
 if [ $? -ne 0 ]; then
     echo "C++ 程序编译失败，脚本终止。"
     exit 1
@@ -35,9 +36,11 @@ declare -a PROMPTS=(
     "an empty prompt"
 )
 
-declare -a PROMPTS=(
-    "LLaMA.cpp is a great tool!"
-)
+#declare -a PROMPTS=(
+    #"LLaMA.cpp is a great tool!"
+    #"What is the airspeed velocity of an unladen swallow?"
+    "12345"
+#)
 
 # 循环处理每个 prompt
 echo -e "\n开始批量处理 prompts..."
@@ -51,7 +54,9 @@ for i in "${!PROMPTS[@]}"; do
 
     # 执行 C++ 程序
     echo "正在运行 C++ embedding 程序..."
-    ./build/bin/llama-embedding -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  --n-gpu-layers 99  -c 257  --pooling cls 
+    #./build/bin/llama-tokenize -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  
+    #exit
+    ./build/bin/llama-embedding -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  --n-gpu-layers 99  -c 257  --pooling cls  -t 1
     if [ $? -ne 0 ]; then
         echo "C++ embedding 程序执行失败，跳过此 prompt。"
         continue

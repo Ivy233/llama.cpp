@@ -2857,14 +2857,14 @@ static void debug_print_tensor_values(struct ggml_tensor * tensor, const char * 
             printf("\n");
         } else {
             // 只打印前10个值
-            int print_count = total_elements > 10 ? 10 : (int)total_elements;
+            int print_count = total_elements > 10 ? 20 : (int)total_elements;
             printf("DEBUG: %s %s - first %d values: ", prefix, node_name, print_count);
             for (int i = 0; i < print_count; i++) {
                 printf("%.6f ", data[i]);
             }
             printf("\n");
         }
-        
+        print_all = false;
         // 计算数值范围
         if (total_elements > 0) {
             float min_val = data[0], max_val = data[0];
@@ -2878,7 +2878,7 @@ static void debug_print_tensor_values(struct ggml_tensor * tensor, const char * 
     } else if (tensor->type == GGML_TYPE_F16) {
         ggml_fp16_t* data = (ggml_fp16_t*)tensor->data;
         int64_t total_elements = ggml_nelements(tensor);
-        int print_count = total_elements > 10 ? 10 : (int)total_elements;
+        int print_count = total_elements > 10 ? 20 : (int)total_elements;
         
         printf("DEBUG: %s %s - first %d values (F16): ", prefix, node_name, print_count);
         for (int i = 0; i < print_count; i++) {
@@ -2888,7 +2888,7 @@ static void debug_print_tensor_values(struct ggml_tensor * tensor, const char * 
     } else if (tensor->type == GGML_TYPE_I32) {
         int32_t* data = (int32_t*)tensor->data;
         int64_t total_elements = ggml_nelements(tensor);
-        int print_count = total_elements > 10 ? 10 : (int)total_elements;
+        int print_count = total_elements > 10 ? 20 : (int)total_elements;
         
         printf("DEBUG: %s %s - first %d values (I32): ", prefix, node_name, print_count);
         for (int i = 0; i < print_count; i++) {
@@ -2923,7 +2923,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
         
         // 打印节点名字和基本信息
-        if(node_n < 50){
+        if(node_n < 5){
             printf("=== Node %d: %s ===\n", node_n, node->name ? node->name : "unnamed");
             printf("Node operation: %s\n", ggml_op_name(node->op));
             
@@ -2945,7 +2945,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         ggml_compute_forward(&params, node);
         
         // 打印输出tensor的值
-        if(node_n < 50){
+        if(node_n < 5){
             debug_print_tensor_values(node, "OUTPUT", node->name ? node->name : "unnamed");
             printf("=== End Node %d ===\n\n", node_n);
             fflush(stdout);
