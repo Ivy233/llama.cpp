@@ -39,7 +39,7 @@ declare -a PROMPTS=(
 #declare -a PROMPTS=(
     #"LLaMA.cpp is a great tool!"
     #"What is the airspeed velocity of an unladen swallow?"
-    "12345"
+    #"12345"
 #)
 
 # 循环处理每个 prompt
