@@ -12,7 +12,8 @@
 void llm_graph_input_embd::set_input(const llama_ubatch * ubatch) {
     if (ubatch->token) {
         const int64_t n_tokens = ubatch->n_tokens;
-
+        printf(" llm_graph_input_embd::set_input n_tokens: %ld\n", n_tokens);
+        printf(" llm_graph_input_embd::set_input ggml_element_size(tokens): %ld\n", ggml_element_size(tokens));
         ggml_backend_tensor_set(tokens, ubatch->token, 0, n_tokens*ggml_element_size(tokens));
     }
 
@@ -898,6 +899,7 @@ ggml_tensor * llm_graph_context::build_inp_embd(ggml_tensor * tok_embd) const {
     ggml_tensor * cur = nullptr;
     printf("batch.n_tokens: %d\n", ubatch.n_tokens);
     if (ubatch.token) {
+        printf("ubatch.n_tokens: %d\n", ubatch.n_tokens);
         inp->tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, ubatch.n_tokens);
         cb(inp->tokens, "inp_tokens", -1);
         ggml_set_input(inp->tokens);
@@ -1283,6 +1285,7 @@ ggml_tensor * llm_graph_context::build_attn(
 
     if (wo) {
         cur = build_lora_mm(wo, cur);
+        cb(cur, "attn_muled_kqv_out", il);
     }
 
     if (wo_b) {

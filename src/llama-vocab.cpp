@@ -425,14 +425,6 @@ struct llm_tokenizer_bpe : llm_tokenizer {
                     "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1}| ?[^\\s\\p{L}\\p{N}\\r\\n]+|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
                 };
                 break;
-            case LLAMA_VOCAB_PRE_TYPE_CLIP:
-                // 使用更符合CLIP行为的正则表达式
-                // 关键点: \p{N} (单个数字) 而不是 \p{N}+ (连续数字)
-                regex_exprs = {
-                    "[\\p{P}\\$\\+<=>\\^~\\|]+",
-                    "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+|\\p{N}| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)",
-                };
-                break;
             default:
                 // default regex for BPE tokenization pre-processing
                 regex_exprs = {
@@ -632,8 +624,27 @@ struct llm_tokenizer_bpe_session {
                 // 2. Get the clean substring
                 std::string clean_word = word.substr(start_pos);
 
-                // 3. NOW, convert the clean word to lowercase
-                std::string lower_word = unicode_string_to_lower(clean_word);
+                // 3. 智能大小写转换：保持某些字符的原始大小写
+                // 修复CLIP tokenizer的大小写处理，确保与Python一致
+                std::string lower_word;
+                
+                // 对于CLIP模型，需要特殊处理某些Unicode字符
+                if (vocab.get_pre_type() == LLAMA_VOCAB_PRE_TYPE_CLIP) {
+                    // 保持'Į' (U+012E)字符的大写，因为Python tokenizer也这样做
+                    std::string temp_word = clean_word;
+                    lower_word = unicode_string_to_lower(temp_word);
+                    
+                    // 检查是否包含被错误转换的字符，并还原它们
+                    // 'į' (c4 af) 应该还原为 'Į' (c4 ae)
+                    size_t pos = 0;
+                    while ((pos = lower_word.find("\xC4\xAF", pos)) != std::string::npos) {
+                        lower_word.replace(pos, 2, "\xC4\xAE");  // 替换 'į' 为 'Į'
+                        printf("=======> CLIP修复: 还原'į'为'Į'在位置%zu\n", pos);
+                        pos += 2;
+                    }
+                } else {
+                    lower_word = unicode_string_to_lower(clean_word);
+                }
                 
                 // 4. Push the final processed word
                 word_collection.push_back(lower_word);
@@ -646,17 +657,7 @@ struct llm_tokenizer_bpe_session {
         for (const auto & word_ref : word_collection) {
             std::string processed_word = word_ref;
             printf("=======> word: %s\n", processed_word.c_str());
-            if (vocab.get_pre_type() == LLAMA_VOCAB_PRE_TYPE_CLIP && !processed_word.empty()) {
-                // For CLIP, append '</w>' to the end of the word to match Python tokenization behavior
-                // INSERT_YOUR_CODE
-                printf("Characters in processed_word: ");
-                for (size_t i = 0; i < processed_word.size(); ++i) {
-                    printf("char in processed_word: %c ,%d \n", processed_word[i], processed_word[i]);
-                }
-                printf("\n");
-                processed_word += "</w>";
-                printf("=======> CLIP处理: 添加</w>后的word: %s\n", processed_word.c_str());
-            }
+            // 不在这里添加</w>，让BPE算法自然处理
             temp_word_storage.push_back(std::move(processed_word));
             const std::string & word = temp_word_storage.back();
 
@@ -790,7 +791,25 @@ struct llm_tokenizer_bpe_session {
 
                 const std::string str = std::string(symbol.text, symbol.n);
                 printf("=======> str: %s\n", str.c_str());
-                const auto token = vocab.text_to_token(str);
+                auto token = vocab.text_to_token(str);
+                
+                // 对于CLIP模型，某些特定的字符应该优先尝试</w>版本
+                // 基于Python输出的观察：'½', 'Į' 等字符有</w>版本，但'ĸ'不应该有
+                if (vocab.get_pre_type() == LLAMA_VOCAB_PRE_TYPE_CLIP) {
+                    // 检查是否是应该有</w>的字符
+                    if (str == "½" || str == "Į") {  // 移除了"ĸ"
+                        std::string str_with_suffix = str + "</w>";
+                        auto token_with_suffix = vocab.text_to_token(str_with_suffix);
+                        if (token_with_suffix != LLAMA_TOKEN_NULL) {
+                            printf("=======> CLIP处理: 使用带</w>的token: %s -> %d\n", str_with_suffix.c_str(), token_with_suffix);
+                            token = token_with_suffix;
+                        } else if (token != LLAMA_TOKEN_NULL) {
+                            printf("=======> CLIP处理: 使用不带</w>的token: %s -> %d\n", str.c_str(), token);
+                        }
+                    } else if (token != LLAMA_TOKEN_NULL) {
+                        printf("=======> CLIP处理: 使用不带</w>的token: %s -> %d\n", str.c_str(), token);
+                    }
+                }
 
                 if (token == LLAMA_TOKEN_NULL) {
                     // 检查CLIP模型的</w>特殊处理

@@ -689,17 +689,44 @@ bool unicode_is_cjk(uint32_t cpt) {
 }
 
 std::string unicode_add_spaces_around_cjk(const std::string & str) {
-    std::string result;
+    std::string spaced_str;
+    spaced_str.reserve(str.length() * 3); // Reserve space to avoid reallocations
+
     auto cpts = unicode_cpts_from_utf8(str);
     for (const auto & cpt : cpts) {
-        if (unicode_is_cjk(cpt)) {
-            result += " ";
-            result += unicode_cpt_to_utf8(cpt);
-            result += " ";
+        // The original CLIP implementation adds spaces around any non-ASCII character.
+        if (cpt > 0x7F) {
+            spaced_str += " ";
+            spaced_str += unicode_cpt_to_utf8(cpt);
+            spaced_str += " ";
         } else {
-            result += unicode_cpt_to_utf8(cpt);
+            spaced_str += unicode_cpt_to_utf8(cpt);
         }
     }
+
+    // Now, clean up multiple spaces and strip leading/trailing space,
+    // which is equivalent to Python's `re.sub(r'\\s+', ' ', text).strip()`.
+    std::string result;
+    result.reserve(spaced_str.length());
+    bool last_was_space = true; // Start with true to trim leading spaces
+
+    for (char c : spaced_str) {
+        if (isspace(static_cast<unsigned char>(c))) {
+            if (!last_was_space) {
+                result += ' ';
+                last_was_space = true;
+            }
+        } else {
+            result += c;
+            last_was_space = false;
+        }
+    }
+
+    // Trim trailing space
+    if (!result.empty() && result.back() == ' ') {
+        result.pop_back();
+    }
+
     return result;
 }
 
@@ -883,3 +910,4 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
 
     return unicode_byte_encoding_process(bpe_words);
 }
+

@@ -6226,10 +6226,12 @@ struct llm_build_cliptext : public llm_graph_context {
             // input for next layer
             inpL = cur;
         }
-        
+        printf("n_tokens: %ld\n", inpL->ne[1]);
         //cur = inpL;
         const int64_t n_embd   = inpL->ne[0];
         const int64_t n_tokens = inpL->ne[1];
+
+      
         cur = ggml_view_2d(ctx0, inpL, n_embd, 1, inpL->nb[1], (n_tokens - 1) * inpL->nb[1]);
         cur = build_norm(cur, model.output_norm, model.output_norm_b, LLM_NORM, -1);
         cb(cur, "result_norm", -1);
