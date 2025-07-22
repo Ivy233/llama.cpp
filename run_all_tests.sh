@@ -36,12 +36,12 @@ declare -a PROMPTS=(
     "an empty prompt"
 )
 
-declare -a PROMPTS=(
+#declare -a PROMPTS=(
     #"LLaMA.cpp is a great tool!"
     #"What is the airspeed velocity of an unladen swallow?"
     #"12345"
-    "你好，世界"
-)
+    #"你好，世界"
+#)
 
 # 循环处理每个 prompt
 echo -e "\n开始批量处理 prompts..."
@@ -54,11 +54,10 @@ for i in "${!PROMPTS[@]}"; do
     echo "Prompt: \"$PROMPT\""
 
     # 执行 C++ 程序
-    echo "正在运行 C++ embedding 程序..."
-    ./build/bin/llama-tokenize -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  
-    exit
+    #echo "正在运行 C++ embedding 程序..."
+    #./build/bin/llama-tokenize -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  
+    #exit
     ./build/bin/llama-embedding -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  --n-gpu-layers 99  -c 257  --pooling cls  -t 1
-    exit
     if [ $? -ne 0 ]; then
         echo "C++ embedding 程序执行失败，跳过此 prompt。"
         continue
