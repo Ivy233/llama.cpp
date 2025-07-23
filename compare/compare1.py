@@ -145,6 +145,41 @@ def find_file_pairs(search_path=None):
     
     return all_pairs
 
+def compare_embeddings_with_stats(file1, file2, format_type="", directory=""):
+    """Compare two embedding files and return statistics"""
+    # 先运行原来的比较函数显示详细信息
+    success = compare_embeddings(file1, file2, format_type, directory)
+    
+    if not success:
+        return None
+    
+    # 重新读取数据计算统计信息
+    emb1 = read_embedding_file(file1)
+    emb2 = read_embedding_file(file2)
+    
+    if emb1 is None or emb2 is None:
+        return None
+    
+    # 计算统计数据
+    stats, abs_diff, rel_diff = calculate_differences(emb1, emb2)
+    
+    # 计算余弦相似度和L2距离
+    from numpy.linalg import norm
+    cos_sim = np.dot(emb1, emb2) / (norm(emb1) * norm(emb2))
+    l2_distance = norm(emb1 - emb2)
+    
+    return {
+        'format': format_type,
+        'directory': directory,
+        'cos_sim': cos_sim,
+        'l2_dist': l2_distance,
+        'norm_rel_err': stats['norm_rel_diff'],
+        'max_abs_diff': stats['max_abs_diff'],
+        'mean_abs_diff': stats['mean_abs_diff'],
+        'exact_matches': stats['num_exact_matches'],
+        'total_elements': stats['length']
+    }
+
 def compare_embeddings(file1, file2, format_type="", directory=""):
     """Compare two embedding files"""
     if format_type and directory:
@@ -277,16 +312,114 @@ def main():
         print(f"  - {pair['format']}{dir_info}: {os.path.basename(pair['cpp_file'])} vs {os.path.basename(pair['py_file'])}")
     print()
     
+    # 统计结果
+    results = []
+    successful_comparisons = 0
+    failed_comparisons = 0
+    
     # Compare each file pair
     for i, pair in enumerate(pairs):
         if i > 0:
             print("\n" + "="*80 + "\n")
         
-        success = compare_embeddings(pair['cpp_file'], pair['py_file'], pair['format'], pair['directory'])
-        if not success:
+        result = compare_embeddings_with_stats(pair['cpp_file'], pair['py_file'], pair['format'], pair['directory'])
+        if result:
+            results.append(result)
+            successful_comparisons += 1
+        else:
             print(f"❌ Error comparing {pair['format']} format files in {pair['directory']}")
+            failed_comparisons += 1
     
-    print(f"\n🎉 Completed comparison of all {len(pairs)} file pairs!")
+    # 输出统计报告
+    print("\n" + "="*80)
+    print("📊 FINAL STATISTICS REPORT")
+    print("="*80)
+    
+    if results:
+        # ✅ 修复：按数字顺序排序而非余弦相似度
+        def extract_number_from_format(format_str):
+            """从格式字符串中提取数字，例如 'text_0' -> 0, 'text' -> 0"""
+            import re
+            match = re.search(r'(\d+)', format_str)
+            return int(match.group(1)) if match else 0
+        
+        results.sort(key=lambda x: extract_number_from_format(x['format']))
+        
+        print(f"Total tests: {len(results) + failed_comparisons}")
+        print(f"Successful tests: {successful_comparisons}")
+        print(f"Failed tests: {failed_comparisons}")
+        print()
+        
+        # 余弦相似度统计
+        cos_sims = [r['cos_sim'] for r in results if not np.isnan(r['cos_sim'])]
+        if cos_sims:
+            print("Cosine Similarity Statistics:")
+            print(f"  Average: {np.mean(cos_sims):.6f}")
+            print(f"  Median:  {np.median(cos_sims):.6f}")
+            print(f"  Min:     {np.min(cos_sims):.6f}")
+            print(f"  Max:     {np.max(cos_sims):.6f}")
+            print()
+        
+        # 详细结果表
+        print("Detailed Results (sorted by numeric order):")
+        print("-" * 100)
+        print(f"{'Test Name':<25} {'Cos Sim':<12} {'L2 Dist':<12} {'Norm Rel Err':<12} {'Status':<15}")
+        print("-" * 100)
+        
+        excellent_tests = []  # cos_sim >= 0.99
+        good_tests = []       # 0.95 <= cos_sim < 0.99
+        problematic_tests = []# cos_sim < 0.95
+        nan_tests = []        # cos_sim is NaN
+        
+        for result in results:
+            test_name = f"{result['format']}_{result['directory']}"[:24]
+            cos_sim = result['cos_sim']
+            l2_dist = result['l2_dist']
+            norm_rel_err = result['norm_rel_err']
+            
+            # 分类
+            if np.isnan(cos_sim):
+                status = "❌ NaN"
+                nan_tests.append(result)
+            elif cos_sim >= 0.99:
+                status = "✅ Excellent"
+                excellent_tests.append(result)
+            elif cos_sim >= 0.95:
+                status = "🟡 Good"
+                good_tests.append(result)
+            else:
+                status = "❌ Poor"
+                problematic_tests.append(result)
+            
+            print(f"{test_name:<25} {cos_sim:<12.8f} {l2_dist:<12.6f} {norm_rel_err:<12.4f} {status:<15}")
+        
+        print("-" * 100)
+        print()
+        
+        # 问题分析
+        print("Problem Analysis:")
+        print(f"✅ Excellent tests (cos_sim >= 0.99): {len(excellent_tests)}")
+        print(f"🟡 Good tests (0.95 <= cos_sim < 0.99): {len(good_tests)}")
+        print(f"❌ Poor tests (cos_sim < 0.95): {len(problematic_tests)}")
+        print(f"❌ NaN/Error tests: {len(nan_tests)}")
+        print()
+        
+        if problematic_tests:
+            print("🔍 Problematic Tests (need attention):")
+            for result in problematic_tests:
+                print(f"  - {result['format']} ({result['directory']}): cos_sim = {result['cos_sim']:.6f}")
+            print()
+        
+        if nan_tests:
+            print("🚨 Tests with NaN/Error (critical issues):")
+            for result in nan_tests:
+                print(f"  - {result['format']} ({result['directory']}): likely zero vectors or computation error")
+            print()
+    
+    else:
+        print("No successful comparisons to report.")
+    
+    print(f"🎉 Completed analysis of all {len(pairs)} test cases!")
 
 if __name__ == "__main__":
     # Support command line arguments (backward compatibility)

@@ -39,7 +39,9 @@ static std::vector<std::string> split_lines(const std::string & s, const std::st
 static void batch_add_seq(llama_batch & batch, const std::vector<int32_t> & tokens, llama_seq_id seq_id) {
     size_t n_tokens = tokens.size();
     for (size_t i = 0; i < n_tokens; i++) {
-        common_batch_add(batch, tokens[i], i, { seq_id }, true);
+        // For sequence-level pooling, only set logits=true for the last token
+        bool need_logits = (i == n_tokens - 1);
+        common_batch_add(batch, tokens[i], i, { seq_id }, need_logits);
     }
 }
 
@@ -83,9 +85,9 @@ static void batch_encode(llama_context * ctx, llama_batch & batch, float * outpu
             embd_pos = i;
             GGML_ASSERT(embd != NULL && "failed to get token embeddings");
         } else {
-            // try to get sequence embeddings - supported only when pooling_type is not NONE
-            embd = llama_get_embeddings_seq(ctx, batch.seq_id[i][0]);
-            embd_pos = batch.seq_id[i][0];
+            // try to get sequence embeddings - for mean/cls pooling, use sequence 0
+            embd = llama_get_embeddings_seq(ctx, 0);  // Always use sequence 0
+            embd_pos = 0;  // Always use position 0 for sequence embeddings
             GGML_ASSERT(embd != NULL && "failed to get sequence embeddings");
         }
 
@@ -109,6 +111,11 @@ static void batch_encode(llama_context * ctx, llama_batch & batch, float * outpu
             }
             printf("\n");
             printf("归一化类型: %d (0=无, 1=L2, 2=其他)\n", embd_norm);
+        }
+        
+        // For sequence-level pooling, we only need one embedding per sequence
+        if (pooling_type != LLAMA_POOLING_TYPE_NONE) {
+            break;  // Exit after processing first valid token for sequence pooling
         }
     }
     
@@ -577,7 +584,7 @@ int main(int argc, char ** argv) {
             }
 
             // add to batch
-            batch_add_seq(batch, inp, s);
+            batch_add_seq(batch, inp, 0);  // Always use sequence 0 for sequence-level pooling
             s += 1;
         }
 

@@ -22,25 +22,84 @@ echo "C++ 程序编译成功。"
 
 # 定义测试用的 prompts 数组
 declare -a PROMPTS=(
-    "hello world"
-    "  hello   world  "
-    "你好，世界"
-    "LLaMA.cpp is a great tool!"
-    "What is the airspeed velocity of an unladen swallow?"
-    "12345"
-    "A B C D E"
-    "    "
-    "CLIP: Contrastive Language-Image Pre-Training"
-    "複雑な日本語テキスト"
-    " leading and trailing spaces "
-    "an empty prompt"
-)
+      # 基础测试
+      "hello world"
+      "  hello   world  "
+      "你好，世界"
+      "LLaMA.cpp is a great tool!"
+      "What is the airspeed velocity of an unladen swallow?"
+      "12345"
+      "A B C D E"
+      "    "
+      "CLIP: Contrastive Language-Image Pre-Training"
+      "複雑な日本語テキスト"
+      " leading and trailing spaces "
+      "an empty prompt"
+
+      # Unicode和特殊字符测试
+      "Café naïve résumé"                    # 法语重音符号
+      "Москва Санкт-Петербург"              # 俄语西里尔字母
+      "한국어 테스트"                        # 韩语
+      "ﺎﻠﻋﺮﺒﻳﺓ ﺎﺨﺘﺑﺍﺭ"                       # 阿拉伯语
+      "🚀🌟💻🎯"                              # Emoji
+      "α β γ δ ε ζ η θ"                     # 希腊字母
+      "①②③④⑤"                               # 圈数字
+
+      # 标点符号和特殊符号测试
+      "Hello, world!"
+      "What's that? It's amazing!"
+      "Price: $100.50 (50% off)"
+      "Email: test@example.com"
+      "Path: /usr/bin/python3.9"
+      "Math: 2+2=4, x²+y²=z²"
+      "Quotes: \"Hello\" 'world'"
+
+      # 混合语言测试
+      "Hello 世界 Bonjour мир"
+      "English中文日本語한국어"
+      "Code: print('你好')"
+
+      # 数字和字母数字组合
+      "ABC123XYZ"
+      "Version 1.2.3-beta"
+      "ID: user123_test"
+      "IPv4: 192.168.1.1"
+
+      # 长度边界测试
+      "a"                                    # 单字符
+      "ab"                                   # 双字符
+      "abcdefghijklmnopqrstuvwxyz"          # 长英文
+      "你"                                   # 单个中文字符
+      "这是一个相对较长的中文句子，用来测试tokenizer的处理能力"
+
+      # 特殊空白字符测试
+      "word1    word2"                         # Tab字符
+      "line1\nline2"                        # 换行符
+      "multiple   spaces   between"         # 多个空格
+
+      # 大小写混合测试
+      "MiXeD CaSe TeXt"
+      "iPhone MacBook iOS"
+      "HTML CSS JavaScript"
+
+      # 缩写和特殊形式
+      "don't won't can't shouldn't"
+      "I'm you're they're we'll"
+      "Dr. Prof. Mr. Mrs. vs. etc."
+
+      # 技术术语
+      "HTTP HTTPS REST API JSON XML"
+      "machine learning AI transformer"
+      "const fn = () => { return 42; }"
+  )
 
 #declare -a PROMPTS=(
     #"LLaMA.cpp is a great tool!"
     #"What is the airspeed velocity of an unladen swallow?"
     #"12345"
     #"你好，世界"
+    #"Москва Санкт-Петербург"
+    #"line1\nline2"
 #)
 
 # 循环处理每个 prompt
@@ -54,10 +113,10 @@ for i in "${!PROMPTS[@]}"; do
     echo "Prompt: \"$PROMPT\""
 
     # 执行 C++ 程序
-    #echo "正在运行 C++ embedding 程序..."
+    echo "正在运行 C++ embedding 程序..."
     #./build/bin/llama-tokenize -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  
     #exit
-    ./build/bin/llama-embedding -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  --n-gpu-layers 99  -c 257  --pooling cls  -t 1
+    ./build/bin/llama-embedding -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  --n-gpu-layers 0  -c 77  --pooling mean  -t 1
     if [ $? -ne 0 ]; then
         echo "C++ embedding 程序执行失败，跳过此 prompt。"
         continue
