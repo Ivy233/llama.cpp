@@ -11,7 +11,7 @@ echo "已清理并创建输出目录。"
 
 # 编译 C++ embedding 程序
 echo "正在编译 C++ embedding 程序..."
-cmake -B build -DGGML_CUDA=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache
+cmake -B build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache
 cmake --build build --target llama-embedding -j
 cmake --build build --target llama-tokenize -j
 if [ $? -ne 0 ]; then
@@ -91,6 +91,14 @@ declare -a PROMPTS=(
       "HTTP HTTPS REST API JSON XML"
       "machine learning AI transformer"
       "const fn = () => { return 42; }"
+
+      # 内部数据集样例 - DSL查询语言
+      "我想要几天后的文件，或者那些文件大小大于623KB或者小于953G，或者内容包含"5.数据安全保障"的文件。"
+      "帮我找找文件名包含"resolution"且日期在元宵节之前的文件。还有啊，我也需要那种内容包含"创新无限"并且大小比"/financial_statement_2023.xlsx"小的文件。"
+
+      # 内部数据集样例 - 函数调用
+      "请获取英国邮编 WC2N 5DU 和 EC1A 1BB 的地址。另外，在法国查找一个名为"马赛"的市镇。"
+      "获取亚马逊公司（AMZN）的股票统计数据以及美元兑印度卢比的汇率。"
   )
 
 #declare -a PROMPTS=(
@@ -116,7 +124,7 @@ for i in "${!PROMPTS[@]}"; do
     echo "正在运行 C++ embedding 程序..."
     #./build/bin/llama-tokenize -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  
     #exit
-    ./build/bin/llama-embedding -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  --n-gpu-layers 0  -c 77  --pooling mean  -t 1
+    ./build/bin/llama-embedding -m /root/autodl-fs/bge-gguf/BGE-VL-large-text.gguf  -p "$PROMPT"  --n-gpu-layers 99  -c 77  --pooling mean  -t 1
     if [ $? -ne 0 ]; then
         echo "C++ embedding 程序执行失败，跳过此 prompt。"
         continue
