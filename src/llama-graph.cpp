@@ -312,7 +312,7 @@ void llm_graph_input_cross_embd::set_input(const llama_ubatch * ubatch) {
 
 void llm_graph_input_attn_no_cache::set_input(const llama_ubatch * ubatch) {
     printf("kq_mask: %p\n", kq_mask);
-    printf("kq_mask shape: %d, %d, %d\n", kq_mask->ne[0], kq_mask->ne[1], kq_mask->ne[2]);
+    //printf("kq_mask shape: %d, %d, %d\n", kq_mask->ne[0], kq_mask->ne[1], kq_mask->ne[2]);
     printf("cparams.causal_attn: %d\n", cparams.causal_attn);
     printf("n_seqs: %d\n", ubatch->n_seqs);
     printf("n_seq_tokens: %d\n", ubatch->n_seq_tokens);
@@ -339,7 +339,6 @@ void llm_graph_input_attn_no_cache::set_input(const llama_ubatch * ubatch) {
                             for (int i = 0; i < n_seq_tokens; ++i) {
                                 const int32_t ti = s0*n_seq_tokens + i;
                                 float f = -INFINITY;
-                                printf("s0: %d, ubatch->n_seq_id[s0]: %d\n", s0, ubatch->n_seq_id[s0]);
                                 for (int s = 0; s < ubatch->n_seq_id[s0]; ++s) {
                                     if (ubatch->seq_id[s0][s] == seq_id && ubatch->pos[ti] <= ubatch->pos[tj]) {
                                         if (hparams.use_alibi) {
@@ -351,7 +350,6 @@ void llm_graph_input_attn_no_cache::set_input(const llama_ubatch * ubatch) {
                                     }
                                 }
                                 auto index = h*(n_kv*n_tokens) + tj*n_kv + ti;
-                                printf("assign f: %f to index: %d\n", data[index], index);
                                 data[h*(n_kv*n_tokens) + tj*n_kv + ti] = f;
                             }
                         }

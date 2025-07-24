@@ -45,8 +45,10 @@ static void batch_add_seq(llama_batch & batch, const std::vector<int32_t> & toke
     }
 }
 
-static void batch_encode(llama_context * ctx, llama_batch & batch, float * output, int n_seq, int n_embd, int embd_norm) {
+static void batch_encode(llama_context * ctx, llama_batch & batch, float * output, int n_seq, int n_embd, int embd_norm, bool is_image = false) {
     const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
+    
+    printf("当前context的pooling类型: %d (0=NONE, 1=MEAN, 2=CLS, 3=LAST)\n", pooling_type);
 
     // clear previous kv_cache values (irrelevant for embeddings)
     llama_kv_self_clear(ctx);
@@ -55,6 +57,7 @@ static void batch_encode(llama_context * ctx, llama_batch & batch, float * outpu
     printf("=== llama.cpp BGE-VL 神经网络推理开始 ===\n");
     printf("输入 batch.n_tokens: %d\n", batch.n_tokens);
     printf("输入 embeddings 维度: %d\n", n_embd);
+    printf("Context ctx大小: %d\n", llama_n_ctx(ctx));
     if (batch.embd != nullptr) {
         printf("输入 input_embeds (前10个): ");
         for (int i = 0; i < 10 && i < n_embd; ++i) {
@@ -79,13 +82,14 @@ static void batch_encode(llama_context * ctx, llama_batch & batch, float * outpu
         const float * embd = nullptr;
         int embd_pos = 0;
 
+        // 根据context设置的pooling类型来提取embeddings
         if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
             // try to get token embeddings
             embd = llama_get_embeddings_ith(ctx, i);
             embd_pos = i;
             GGML_ASSERT(embd != NULL && "failed to get token embeddings");
         } else {
-            // try to get sequence embeddings - for mean/cls pooling, use sequence 0
+            // try to get sequence embeddings - for mean/cls/last pooling, use sequence 0
             embd = llama_get_embeddings_seq(ctx, 0);  // Always use sequence 0
             embd_pos = 0;  // Always use position 0 for sequence embeddings
             GGML_ASSERT(embd != NULL && "failed to get sequence embeddings");
@@ -173,23 +177,24 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
     for (int y = 0; y < ny3; y++) {
         for (int x = 0; x < nx3; x++) {
             for (int c = 0; c < 3; c++) {
-                // linear interpolation
-                const float sx = (x + 0.5f) * scale - 0.5f;
-                const float sy = (y + 0.5f) * scale - 0.5f;
+                // 修复：正确的双线性插值映射
+                // 从输出坐标映射到输入坐标：output_coord / scale
+                const float sx = (x + 0.5f) / scale - 0.5f;
+                const float sy = (y + 0.5f) / scale - 0.5f;
 
                 const int x0 = std::max(0, (int)std::floor(sx));
                 const int y0 = std::max(0, (int)std::floor(sy));
 
-                const int x1 = std::min(x0 + 1, width - 1);
-                const int y1 = std::min(y0 + 1, height - 1);
+                const int x1 = std::min(x0 + 1, longer_side - 1);
+                const int y1 = std::min(y0 + 1, longer_side - 1);
 
                 const float dx = sx - x0;
                 const float dy = sy - y0;
 
-                const int j00 = 3 * (y0 * width + x0) + c;
-                const int j01 = 3 * (y0 * width + x1) + c;
-                const int j10 = 3 * (y1 * width + x0) + c;
-                const int j11 = 3 * (y1 * width + x1) + c;
+                const int j00 = 3 * (y0 * longer_side + x0) + c;
+                const int j01 = 3 * (y0 * longer_side + x1) + c;
+                const int j10 = 3 * (y1 * longer_side + x0) + c;
+                const int j11 = 3 * (y1 * longer_side + x1) + c;
 
                 const float v00 = temp[j00];
                 const float v01 = temp[j01];
@@ -211,8 +216,10 @@ llama_batch llama_image_preprocess(const uint8_t* image_data, int width, int hei
     }
     //TODO remove
 
-    int num_patches_per_dim = height / patch_size;
-    printf("num_patches_per_dim: %d\n", num_patches_per_dim);
+    // 修复：使用target_size而不是原始height计算patch数量
+    // 因为图像已经被resize到target_size x target_size
+    int num_patches_per_dim = target_size / patch_size;
+    printf("num_patches_per_dim (fixed): %d (target_size=%d, patch_size=%d)\n", num_patches_per_dim, target_size, patch_size);
     int num_patches = num_patches_per_dim * num_patches_per_dim;
     
     batch = llama_batch_init(num_patches, target_size * target_size * 3, 1);
@@ -363,7 +370,7 @@ static bool process_image_embedding(llama_context * ctx, const std::string & ima
     printf("开始BGE-VL模型推理...\n");
     // Get image embeddings
     printf("llm_batch.n_tokens: %d\n", llm_batch.n_tokens);
-    batch_encode(ctx, llm_batch, output, 1, n_embd, embd_norm);
+    batch_encode(ctx, llm_batch, output, 1, n_embd, embd_norm, true);  // true表示这是图像
 
     printf("BGE-VL embedding生成完成！\n");
     printf("最终embedding维度: %d\n", n_embd);
@@ -451,6 +458,19 @@ int main(int argc, char ** argv) {
     llama_backend_init();
     llama_numa_init(params.numa);
 
+    // BGE-VL池化策略：基于实际测试结果
+    // 根据commit 43fdaecb的实际测试，文本模型需要使用CLS池化
+    bool is_image = !params.image.empty();
+    if (is_image) {
+        // 图像输入：强制使用CLS池化（位置0），匹配Python实现 last_hidden_state[:, 0, :]
+        params.pooling_type = LLAMA_POOLING_TYPE_CLS;
+        printf("BGE-VL: 检测到图像输入，强制设置CLS池化类型（匹配Python实现）\n");
+    } else {
+        // 文本输入：根据实际测试，commit 43fdaecb的文本模型需要使用CLS池化才能正常工作
+        params.pooling_type = LLAMA_POOLING_TYPE_CLS;
+        printf("BGE-VL: 检测到文本输入，强制设置CLS池化类型（基于实际测试结果）\n");
+    }
+
     // load the model
     common_init_result llama_init = common_init_from_params(params);
 
@@ -484,9 +504,7 @@ int main(int argc, char ** argv) {
         LOG_INF("\n");
         LOG_INF("%s\n", common_params_get_system_info(params).c_str());
     }
-
-    // Check if input is an image
-    bool is_image = !params.image.empty();
+    
     int n_embd_count = 0;
 
     // Allocate output for embeddings
@@ -513,6 +531,16 @@ int main(int argc, char ** argv) {
         std::vector<std::vector<int32_t>> inputs;
         for (const auto & prompt : prompts) {
             auto inp = common_tokenize(ctx, prompt, true, true);
+            
+            // BGE-VL模型限制：检查是否超过最大上下文长度
+            const int max_ctx_length = llama_model_n_ctx_train(llama_get_model(ctx));
+            if (inp.size() > max_ctx_length) {
+                LOG_ERR("%s: prompt too long (%lld tokens), BGE-VL model only supports up to %d tokens\n", 
+                        __func__, (long long int) inp.size(), max_ctx_length);
+                LOG_ERR("%s: please shorten your prompt or split it into smaller parts\n", __func__);
+                return 1;
+            }
+            
             if (inp.size() > n_batch) {
                 LOG_ERR("%s: number of tokens in input line (%lld) exceeds batch size (%lld), increase batch size and re-run\n",
                         __func__, (long long int) inp.size(), (long long int) n_batch);
@@ -553,13 +581,8 @@ int main(int argc, char ** argv) {
         struct llama_batch batch = llama_batch_init(n_batch, 0, 1);
 
         // count number of embeddings
-        if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
-            for (int k = 0; k < n_prompts; k++) {
-                n_embd_count += inputs[k].size();
-            }
-        } else {
-            n_embd_count = n_prompts;
-        }
+        // BGE-VL: 文本始终使用LAST池化（序列级），所以总是n_prompts个embedding
+        n_embd_count = n_prompts;
 
         // allocate output
         embeddings.resize(n_embd_count * n_embd, 0);
@@ -577,8 +600,8 @@ int main(int argc, char ** argv) {
             // encode if at capacity
             if (batch.n_tokens + n_toks > n_batch) {
                 float * out = emb + e * n_embd;
-                batch_encode(ctx, batch, out, s, n_embd, params.embd_normalize);
-                e += pooling_type == LLAMA_POOLING_TYPE_NONE ? batch.n_tokens : s;
+                batch_encode(ctx, batch, out, s, n_embd, params.embd_normalize, false);  // false表示这是文本
+                e += s;  // BGE-VL: 文本使用LAST池化，所以添加序列数
                 s = 0;
                 common_batch_clear(batch);
             }
@@ -590,7 +613,7 @@ int main(int argc, char ** argv) {
 
         // final batch
         float * out = emb + e * n_embd;
-        batch_encode(ctx, batch, out, s, n_embd, params.embd_normalize);
+        batch_encode(ctx, batch, out, s, n_embd, params.embd_normalize, false);  // false表示这是文本
         // clean up batch
         llama_batch_free(batch);
     }
@@ -612,27 +635,7 @@ int main(int argc, char ** argv) {
             save_embedding_to_file(emb, n_embd, "img", params.image[0]);
 
             LOG("\n");
-        } else if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
-            for (int j = 0; j < n_embd_count; j++) {
-                LOG("embedding %d: ", j);
-                for (int i = 0; i < std::min(3, n_embd); i++) {
-                    if (params.embd_normalize == 0) {
-                        LOG("%6.0f ", emb[j * n_embd + i]);
-                    } else {
-                        LOG("%9.6f ", emb[j * n_embd + i]);
-                    }
-                }
-                LOG(" ... ");
-                for (int i = n_embd - 3; i < n_embd; i++) {
-                    if (params.embd_normalize == 0) {
-                        LOG("%6.0f ", emb[j * n_embd + i]);
-                    } else {
-                        LOG("%9.6f ", emb[j * n_embd + i]);
-                    }
-                }
-                LOG("\n");
-            }
-        } else { // LLAMA_POOLING_TYPE_CLS || LLAMA_POOLING_TYPE_MEAN
+        } else { // LLAMA_POOLING_TYPE_CLS || LLAMA_POOLING_TYPE_MEAN || LLAMA_POOLING_TYPE_LAST
             save_embedding_to_file(emb, n_embd, "text", output_suffix);
             // print the first part of the embeddings or for a single prompt, the full embedding
             int n_prompts = is_image ? 1 : n_embd_count;
