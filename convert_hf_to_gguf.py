@@ -806,6 +806,9 @@ class TextModel(ModelBase):
         if chkhsh == "d5f1dd6f980fec569fb218a81a7658ac45fc56b38c5a0adeb1c232fbe04ef5ec":
             # ref: https://huggingface.co/ByteDance-Seed/Seed-Coder-8B-Base
             res = "seed-coder"
+        if chkhsh == "95dceb5d5e05a6c48df1725292107bea96911f441f32b71217d3f419cf529992":
+            # ref: https://huggingface.co/BAAI/bge-vl-large
+            res = "bge-vl"
 
         if res is None:
             logger.warning("\n")
@@ -6227,6 +6230,228 @@ class UltravoxWhisperEncoderModel(WhisperEncoderModel):
         super().set_gguf_parameters()
         self.gguf_writer.add_audio_stack_factor(self.global_config["stack_factor"])
 
+
+###### BGE-VL MODEL ######
+
+@ModelBase.register("CLIPModel")
+class BGEVLModel(TextModel):
+    """BGE-VL model that generates separate text and vision GGUF files"""
+    
+    # Use BGE-VL text architecture for the main model
+    model_arch = gguf.MODEL_ARCH.BGEVL_TEXT
+    
+    def __init__(self, *args, **kwargs):
+        # Check if this is actually a BGE-VL model by looking at config
+        config_check = kwargs.get('hparams') or ModelBase.load_hparams(kwargs.get('dir_model', args[0]))
+        
+        # BGE-VL models should have text_config and vision_config
+        if 'text_config' not in config_check or 'vision_config' not in config_check:
+            raise ValueError("This CLIPModel doesn't appear to be a BGE-VL model (missing text_config or vision_config)")
+        
+        # Also check for projection_dim which is specific to BGE-VL
+        if 'projection_dim' not in config_check:
+            raise ValueError("This CLIPModel doesn't appear to be a BGE-VL model (missing projection_dim)")
+            
+        logger.info("Detected BGE-VL model, using BGE-VL conversion pipeline")
+        
+        # Set up file names for dual output
+        self._setup_output_files(args, kwargs)
+        
+        super().__init__(*args, **kwargs)
+        
+        # Extract model parameters first
+        self.text_config = self.hparams["text_config"]
+        self.vision_config = self.hparams["vision_config"]
+        
+        # Text model parameters
+        self.text_n_blocks = self.text_config["num_hidden_layers"] 
+        self.vision_n_blocks = self.vision_config["num_hidden_layers"]
+        
+        # Initialize vision model components directly in main class
+        self._init_vision_components()
+        
+        # Set block count for compatibility
+        self.block_count = self.text_n_blocks
+        self.tensor_map = gguf.get_tensor_name_map(gguf.MODEL_ARCH.BGEVL_TEXT, self.block_count)
+        
+    def _init_vision_components(self):
+        """Initialize vision model components"""
+        # Create vision model tensor map
+        self.vision_tensor_map = gguf.get_tensor_name_map(gguf.MODEL_ARCH.BGEVL_VISION, self.vision_n_blocks)
+        
+        # Create GGUF writer for vision model
+        self.vision_gguf_writer = gguf.GGUFWriter(
+            path=None, 
+            arch=gguf.MODEL_ARCH_NAMES[gguf.MODEL_ARCH.BGEVL_VISION], 
+            endianess=self.endianess, 
+            use_temp_file=self.use_temp_file
+        )
+        
+    def _setup_output_files(self, args, kwargs):
+        """Setup output file paths for text and vision models"""
+        fname_out = kwargs.get('fname_out') or (args[2] if len(args) > 2 else None)
+        if fname_out:
+            if isinstance(fname_out, str):
+                fname_out = Path(fname_out)
+            
+            # Create separate paths for text and vision models
+            self.text_fname_out = fname_out.parent / f"{fname_out.stem}-text.gguf"
+            self.vision_fname_out = fname_out.parent / f"{fname_out.stem}-vision.gguf"
+            
+            # Modify args tuple if fname_out is passed as positional argument
+            if len(args) > 2:
+                args = (args[0], args[1], self.text_fname_out) + args[3:]
+            else:
+                kwargs['fname_out'] = self.text_fname_out
+        else:
+            # Fallback paths if no fname_out provided
+            self.text_fname_out = Path("bge-vl-text.gguf")
+            self.vision_fname_out = Path("bge-vl-vision.gguf")
+
+    def set_vocab(self):
+        """Set vocabulary for BGE-VL text model using CLIP tokenizer format"""
+        # Use GPT2 tokenizer but with CLIP pre-tokenizer type
+        tokens, toktypes, _ = self.get_vocab_base()  # Ignore the detected tokpre
+        self.gguf_writer.add_tokenizer_model("gpt2")
+        self.gguf_writer.add_tokenizer_pre("clip")  # Force CLIP pre-tokenizer instead of bge-vl
+        self.gguf_writer.add_token_list(tokens)
+        self.gguf_writer.add_token_types(toktypes)
+
+        special_vocab = gguf.SpecialVocab(self.dir_model, load_merges=True)
+        special_vocab.add_to_gguf(self.gguf_writer)
+
+    def set_gguf_parameters(self):
+        """Set parameters for text model"""
+        # Set text model parameters using parent class logic
+        super().set_gguf_parameters()
+        
+        # Add BGE-VL specific parameters for text model
+        self._add_text_model_parameters()
+        
+        # Set vision model parameters
+        self._set_vision_gguf_parameters()
+        
+    def _add_text_model_parameters(self):
+        """Add BGE-VL specific parameters for text model"""
+        self.gguf_writer.add_causal_attention(False)  # BGE-VL text model is not causal
+        self.gguf_writer.add_logit_scale(self.hparams.get("logit_scale_init_value", 2.6592))
+        
+        # Add hidden_size parameter required by llama.cpp
+        text_hidden_size = self.text_config["hidden_size"]
+        self.gguf_writer.add_uint32("clip-text.hidden_size", text_hidden_size)
+
+    def _set_vision_gguf_parameters(self):
+        """Set vision model parameters"""
+        vision_config = self.vision_config
+        self.vision_gguf_writer.add_file_type(self.ftype)
+        self.vision_gguf_writer.add_feed_forward_length(vision_config["intermediate_size"])
+        self.vision_gguf_writer.add_head_count(vision_config["num_attention_heads"])
+        self.vision_gguf_writer.add_block_count(vision_config["num_hidden_layers"])
+        self.vision_gguf_writer.add_embedding_length(self.hparams["projection_dim"])
+        self.vision_gguf_writer.add_layer_norm_eps(vision_config["layer_norm_eps"])
+        self.vision_gguf_writer.add_logit_scale(self.hparams.get("logit_scale_init_value", 2.6592))
+        self.vision_gguf_writer.add_context_length(int(vision_config["image_size"] / vision_config["patch_size"]) + 1)
+        self.vision_gguf_writer.add_causal_attention(False)
+        self.vision_gguf_writer.add_tokenizer_model("no_vocab")
+        
+        # Add missing vision parameters required by llama.cpp
+        self.vision_gguf_writer.add_uint32("image_size", vision_config["image_size"])
+        self.vision_gguf_writer.add_uint32("patch_size", vision_config["patch_size"])
+        self.vision_gguf_writer.add_uint32(f"clip-vision.hidden_size", vision_config["hidden_size"])
+
+    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
+        """Route tensors to appropriate model (text or vision)"""
+        
+        # Skip logit_scale tensor as it's handled as metadata in set_gguf_parameters
+        if name == "logit_scale":
+            return []
+        
+        # Check if this is a vision tensor
+        if self._is_vision_tensor(name):
+            self._process_vision_tensor(name, data_torch)
+            return []  # Don't add to text model
+        
+        # Use standard tensor mapping for all text tensors
+        return super().modify_tensors(data_torch, name, bid)
+    
+    def _is_vision_tensor(self, name: str) -> bool:
+        """Check if tensor belongs to vision model"""
+        vision_prefixes = [
+            "vision_model.",
+            "visual_projection"
+        ]
+        return any(name.startswith(prefix) for prefix in vision_prefixes)
+    
+    def _process_vision_tensor(self, name: str, data_torch: Tensor):
+        """Process a vision tensor and add it to the vision model"""
+        # Map tensor name using standard mapping with proper suffix handling
+        try:
+            gguf_name = self.vision_tensor_map.get_name(name, try_suffixes=(".weight", ".bias"))
+            if gguf_name is None:
+                # Handle special vision tensors manually
+                gguf_name = self._map_special_vision_tensor(name)
+        except:
+            gguf_name = self._map_special_vision_tensor(name)
+        
+        if gguf_name is None:
+            logger.warning(f"Skipping unmapped vision tensor: {name}")
+            return
+        
+        # Determine proper quantization type
+        ftype = gguf.GGMLQuantizationType.F32
+        if self.ftype == gguf.LlamaFileType.MOSTLY_F16 and len(data_torch.shape) >= 2:
+            data_torch = data_torch.to(torch.float16)
+            ftype = gguf.GGMLQuantizationType.F16
+        elif self.ftype == gguf.LlamaFileType.ALL_F32:
+            data_torch = data_torch.to(torch.float32)
+        else:
+            data_torch = data_torch.to(torch.float32)
+        
+        # Add to vision writer
+        self.vision_gguf_writer.add_tensor(gguf_name, data_torch.numpy(), raw_dtype=ftype)
+    
+    def _map_special_vision_tensor(self, name: str) -> str | None:
+        """Map special vision tensors that don't follow standard patterns"""
+        # Handle special vision tensor mappings
+        special_mappings = {
+            "visual_projection.weight": "v.projection.weight",
+            "vision_model.embeddings.class_embedding.weight": "v.class_embd.weight",
+            "vision_model.embeddings.patch_embedding.weight": "v.patch_embd.weight",
+            "vision_model.pre_layrnorm.weight": "input_norm.weight",
+            "vision_model.pre_layrnorm.bias": "input_norm.bias",
+        }
+        
+        if name in special_mappings:
+            return special_mappings[name]
+        
+        # Fallback for unmapped tensors
+        return name
+    
+    def write(self):
+        """Write both text and vision models"""
+        self.prepare_tensors()
+        self.prepare_metadata(vocab_only=False)
+        
+        # Write text model (handled by parent class)
+        self.gguf_writer.write_header_to_file(path=self.text_fname_out)
+        self.gguf_writer.write_kv_data_to_file()
+        self.gguf_writer.write_tensors_to_file(progress=True)
+        self.gguf_writer.close()
+        
+        # Write vision model
+        self._write_vision_model()
+        
+        logger.info(f"BGE-VL text model written to: {self.text_fname_out}")
+        logger.info(f"BGE-VL vision model written to: {self.vision_fname_out}")
+    
+    def _write_vision_model(self):
+        """Write vision model to file"""
+        self.vision_gguf_writer.write_header_to_file(path=self.vision_fname_out)
+        self.vision_gguf_writer.write_kv_data_to_file()
+        self.vision_gguf_writer.write_tensors_to_file(progress=True)
+        self.vision_gguf_writer.close()
+
+
 ###### CONVERSION LOGIC ######
 
 
@@ -6280,7 +6505,13 @@ class LazyTorchTensor(gguf.LazyBase):
     def from_safetensors_slice(cls, st_slice: Any) -> Tensor:
         dtype = cls._dtype_str_map[st_slice.get_dtype()]
         shape: tuple[int, ...] = tuple(st_slice.get_shape())
-        lazy = cls(meta=cls.meta_with_dtype_and_shape(dtype, shape), args=(st_slice,), func=lambda s: s[:])
+        
+        # Handle 0-dimensional tensors
+        if len(shape) == 0:
+            # For 0-dim tensors, we need to handle them differently
+            lazy = cls(meta=cls.meta_with_dtype_and_shape(dtype, shape), args=(st_slice,), func=lambda s: torch.tensor(s[()], dtype=dtype))
+        else:
+            lazy = cls(meta=cls.meta_with_dtype_and_shape(dtype, shape), args=(st_slice,), func=lambda s: s[:])
         return cast(torch.Tensor, lazy)
 
     @classmethod

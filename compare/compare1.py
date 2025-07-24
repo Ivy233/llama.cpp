@@ -336,15 +336,6 @@ def main():
     print("="*80)
     
     if results:
-        # ✅ 修复：按数字顺序排序而非余弦相似度
-        def extract_number_from_format(format_str):
-            """从格式字符串中提取数字，例如 'text_0' -> 0, 'text' -> 0"""
-            import re
-            match = re.search(r'(\d+)', format_str)
-            return int(match.group(1)) if match else 0
-        
-        results.sort(key=lambda x: extract_number_from_format(x['format']))
-        
         print(f"Total tests: {len(results) + failed_comparisons}")
         print(f"Successful tests: {successful_comparisons}")
         print(f"Failed tests: {failed_comparisons}")
@@ -360,41 +351,97 @@ def main():
             print(f"  Max:     {np.max(cos_sims):.6f}")
             print()
         
-        # 详细结果表
-        print("Detailed Results (sorted by numeric order):")
-        print("-" * 100)
-        print(f"{'Test Name':<25} {'Cos Sim':<12} {'L2 Dist':<12} {'Norm Rel Err':<12} {'Status':<15}")
-        print("-" * 100)
-        
-        excellent_tests = []  # cos_sim >= 0.99
-        good_tests = []       # 0.95 <= cos_sim < 0.99
-        problematic_tests = []# cos_sim < 0.95
-        nan_tests = []        # cos_sim is NaN
+        # 将结果分为文本和图像测试
+        text_results = []
+        image_results = []
         
         for result in results:
-            test_name = f"{result['format']}_{result['directory']}"[:24]
-            cos_sim = result['cos_sim']
-            l2_dist = result['l2_dist']
-            norm_rel_err = result['norm_rel_err']
-            
-            # 分类
-            if np.isnan(cos_sim):
-                status = "❌ NaN"
-                nan_tests.append(result)
-            elif cos_sim >= 0.99:
-                status = "✅ Excellent"
-                excellent_tests.append(result)
-            elif cos_sim >= 0.95:
-                status = "🟡 Good"
-                good_tests.append(result)
+            format_name = result['format'].lower()
+            # 判断是否为图像测试（包含 jpg, png, jpeg 等图像格式）
+            if any(img_format in format_name for img_format in ['jpg', 'png', 'jpeg', 'gelu', 'quick_gelu']):
+                image_results.append(result)
             else:
-                status = "❌ Poor"
-                problematic_tests.append(result)
-            
-            print(f"{test_name:<25} {cos_sim:<12.8f} {l2_dist:<12.6f} {norm_rel_err:<12.4f} {status:<15}")
+                text_results.append(result)
         
-        print("-" * 100)
-        print()
+        # 按数字顺序排序的函数
+        def extract_number_from_format(format_str):
+            """从格式字符串中提取数字，例如 'text_0' -> 0, 'text' -> 0"""
+            import re
+            match = re.search(r'(\d+)', format_str)
+            return int(match.group(1)) if match else 0
+        
+        # 分别显示文本和图像测试结果
+        if text_results:
+            text_results.sort(key=lambda x: extract_number_from_format(x['format']))
+            print("📝 TEXT EMBEDDING TESTS:")
+            print("-" * 100)
+            print(f"{'Test Name':<25} {'Cos Sim':<12} {'L2 Dist':<12} {'Norm Rel Err':<12} {'Status':<15}")
+            print("-" * 100)
+            
+            text_excellent = text_good = text_poor = text_nan = 0
+            for result in text_results:
+                test_name = f"{result['format']}_{result['directory']}"[:24]
+                cos_sim = result['cos_sim']
+                l2_dist = result['l2_dist']
+                norm_rel_err = result['norm_rel_err']
+                
+                if np.isnan(cos_sim):
+                    status = "❌ NaN"
+                    text_nan += 1
+                elif cos_sim >= 0.99:
+                    status = "✅ Excellent"
+                    text_excellent += 1
+                elif cos_sim >= 0.95:
+                    status = "🟡 Good"
+                    text_good += 1
+                else:
+                    status = "❌ Poor"
+                    text_poor += 1
+                
+                print(f"{test_name:<25} {cos_sim:<12.8f} {l2_dist:<12.6f} {norm_rel_err:<12.4f} {status:<15}")
+            
+            print("-" * 100)
+            print(f"Text Tests Summary: ✅ {text_excellent} excellent, 🟡 {text_good} good, ❌ {text_poor} poor, ❌ {text_nan} NaN")
+            print()
+        
+        if image_results:
+            image_results.sort(key=lambda x: extract_number_from_format(x['format']))
+            print("🖼️  IMAGE EMBEDDING TESTS:")
+            print("-" * 100)
+            print(f"{'Test Name':<25} {'Cos Sim':<12} {'L2 Dist':<12} {'Norm Rel Err':<12} {'Status':<15}")
+            print("-" * 100)
+            
+            image_excellent = image_good = image_poor = image_nan = 0
+            for result in image_results:
+                test_name = f"{result['format']}_{result['directory']}"[:24]
+                cos_sim = result['cos_sim']
+                l2_dist = result['l2_dist']
+                norm_rel_err = result['norm_rel_err']
+                
+                if np.isnan(cos_sim):
+                    status = "❌ NaN"
+                    image_nan += 1
+                elif cos_sim >= 0.99:
+                    status = "✅ Excellent"
+                    image_excellent += 1
+                elif cos_sim >= 0.95:
+                    status = "🟡 Good"
+                    image_good += 1
+                else:
+                    status = "❌ Poor"
+                    image_poor += 1
+                
+                print(f"{test_name:<25} {cos_sim:<12.8f} {l2_dist:<12.6f} {norm_rel_err:<12.4f} {status:<15}")
+            
+            print("-" * 100)
+            print(f"Image Tests Summary: ✅ {image_excellent} excellent, 🟡 {image_good} good, ❌ {image_poor} poor, ❌ {image_nan} NaN")
+            print()
+        
+        # 重新计算总体统计
+        excellent_tests = [r for r in results if not np.isnan(r['cos_sim']) and r['cos_sim'] >= 0.99]
+        good_tests = [r for r in results if not np.isnan(r['cos_sim']) and 0.95 <= r['cos_sim'] < 0.99]
+        problematic_tests = [r for r in results if not np.isnan(r['cos_sim']) and r['cos_sim'] < 0.95]
+        nan_tests = [r for r in results if np.isnan(r['cos_sim'])]
         
         # 问题分析
         print("Problem Analysis:")

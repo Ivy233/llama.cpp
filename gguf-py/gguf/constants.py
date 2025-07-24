@@ -343,6 +343,8 @@ class MODEL_ARCH(IntEnum):
     WAVTOKENIZER_DEC = auto()
     PLM              = auto()
     BAILINGMOE       = auto()
+    BGEVL_TEXT       = auto()
+    BGEVL_VISION     = auto()
 
 
 class VISION_PROJECTOR_TYPE(IntEnum):
@@ -627,6 +629,8 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
     MODEL_ARCH.WAVTOKENIZER_DEC: "wavtokenizer-dec",
     MODEL_ARCH.PLM:              "plm",
     MODEL_ARCH.BAILINGMOE:       "bailingmoe",
+    MODEL_ARCH.BGEVL_TEXT:       "clip-text",
+    MODEL_ARCH.BGEVL_VISION:     "clip-vision",
 }
 
 VISION_PROJECTOR_TYPE_NAMES: dict[VISION_PROJECTOR_TYPE, str] = {
@@ -2051,6 +2055,36 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.FFN_DOWN_SHEXP,
         MODEL_TENSOR.FFN_UP_SHEXP,
     ],
+    MODEL_ARCH.BGEVL_TEXT: [
+        MODEL_TENSOR.TOKEN_EMBD,
+        MODEL_TENSOR.POS_EMBD,
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.ATTN_NORM,
+        MODEL_TENSOR.ATTN_NORM_2,
+        MODEL_TENSOR.ATTN_Q,
+        MODEL_TENSOR.ATTN_K,
+        MODEL_TENSOR.ATTN_V,
+        MODEL_TENSOR.ATTN_OUT,
+        MODEL_TENSOR.FFN_UP,
+        MODEL_TENSOR.FFN_DOWN,
+        MODEL_TENSOR.T_PROJECTION,
+    ],
+    MODEL_ARCH.BGEVL_VISION: [
+        MODEL_TENSOR.POS_EMBD,
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.INPUT_NORM,
+        MODEL_TENSOR.ATTN_NORM,
+        MODEL_TENSOR.ATTN_NORM_2,
+        MODEL_TENSOR.ATTN_Q,
+        MODEL_TENSOR.ATTN_K,
+        MODEL_TENSOR.ATTN_V,
+        MODEL_TENSOR.ATTN_OUT,
+        MODEL_TENSOR.FFN_UP,
+        MODEL_TENSOR.FFN_DOWN,
+        MODEL_TENSOR.V_PROJECTION,
+        MODEL_TENSOR.CLS,
+        MODEL_TENSOR.V_ENC_EMBD_PATCH,
+    ],
     # TODO
 }
 
@@ -2105,6 +2139,12 @@ MODEL_TENSOR_SKIP: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
     ],
     MODEL_ARCH.BAILINGMOE: [
         MODEL_TENSOR.ROPE_FREQS,
+    ],
+    MODEL_ARCH.BGEVL_TEXT: [
+        # BGE-VL text model doesn't use these tensors
+    ],
+    MODEL_ARCH.BGEVL_VISION: [
+        # BGE-VL vision model doesn't use these tensors
     ],
 }
 

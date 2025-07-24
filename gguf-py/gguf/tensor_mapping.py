@@ -31,6 +31,7 @@ class TensorNameMap:
             "model.embeddings",                          # rwkv7
             "model.word_embeddings",                     # bailingmoe
             "language_model.model.embed_tokens",         # llama4
+            "text_model.embeddings.token_embedding",     # bge-vl
         ),
 
         # Token type embeddings
@@ -56,6 +57,8 @@ class TensorNameMap:
             "transformer.wpe",                 # gpt2
             "embeddings.position_embeddings",  # bert
             "wpe",                             # gpt2
+            "text_model.embeddings.position_embedding",    # bge-vl text
+            "vision_model.embeddings.position_embedding",  # bge-vl vision
         ),
 
         # Output
@@ -92,6 +95,8 @@ class TensorNameMap:
             "model.ln_out",                            # rwkv7
             "backbone.final_layer_norm",               # wavtokenizer
             "model.norm",                              # llama4
+            "text_model.final_layer_norm",             # bge-vl text
+            "vision_model.post_layernorm",             # bge-vl vision
         ),
 
         # Rope frequencies
@@ -827,10 +832,24 @@ class TensorNameMap:
         MODEL_TENSOR.CLS: (
             "classifier",       # jina
             "classifier.dense", # roberta
+            "vision_model.embeddings.class_embedding", # bge-vl vision
         ),
 
         MODEL_TENSOR.CLS_OUT: (
             "classifier.out_proj", # roberta
+        ),
+        
+        # BGE-VL specific tensors
+        MODEL_TENSOR.T_PROJECTION: (
+            "text_projection",  # bge-vl text projection
+        ),
+        
+        MODEL_TENSOR.V_PROJECTION: (
+            "visual_projection",  # bge-vl vision projection  
+        ),
+        
+        MODEL_TENSOR.INPUT_NORM: (
+            "vision_model.pre_layrnorm",  # bge-vl vision input norm
         ),
         #############################################################################
 
@@ -928,6 +947,7 @@ class TensorNameMap:
             "vision_tower.patch_conv", # pixtral
             "vision_model.patch_embedding.linear", # llama 4
             "visual.patch_embed.proj", # qwen2vl
+            "vision_model.embeddings.patch_embedding", # bge-vl
         ),
 
         MODEL_TENSOR.V_ENC_EMBD_POS: (
@@ -1192,6 +1212,62 @@ class TensorNameMap:
             ),
             MODEL_TENSOR.FFN_NORM_EXP: (
                 "model.layers.{bid}.post_attention_layernorm",
+            ),
+        },
+        
+        # BGE-VL text model block mappings
+        MODEL_ARCH.BGEVL_TEXT: {
+            MODEL_TENSOR.ATTN_Q: (
+                "text_model.encoder.layers.{bid}.self_attn.q_proj",
+            ),
+            MODEL_TENSOR.ATTN_K: (
+                "text_model.encoder.layers.{bid}.self_attn.k_proj",
+            ),
+            MODEL_TENSOR.ATTN_V: (
+                "text_model.encoder.layers.{bid}.self_attn.v_proj",
+            ),
+            MODEL_TENSOR.ATTN_OUT: (
+                "text_model.encoder.layers.{bid}.self_attn.out_proj",
+            ),
+            MODEL_TENSOR.ATTN_NORM: (
+                "text_model.encoder.layers.{bid}.layer_norm1",
+            ),
+            MODEL_TENSOR.ATTN_NORM_2: (
+                "text_model.encoder.layers.{bid}.layer_norm2",
+            ),
+            MODEL_TENSOR.FFN_UP: (
+                "text_model.encoder.layers.{bid}.mlp.fc1",
+            ),
+            MODEL_TENSOR.FFN_DOWN: (
+                "text_model.encoder.layers.{bid}.mlp.fc2",
+            ),
+        },
+        
+        # BGE-VL vision model block mappings  
+        MODEL_ARCH.BGEVL_VISION: {
+            MODEL_TENSOR.ATTN_Q: (
+                "vision_model.encoder.layers.{bid}.self_attn.q_proj",
+            ),
+            MODEL_TENSOR.ATTN_K: (
+                "vision_model.encoder.layers.{bid}.self_attn.k_proj",
+            ),
+            MODEL_TENSOR.ATTN_V: (
+                "vision_model.encoder.layers.{bid}.self_attn.v_proj",
+            ),
+            MODEL_TENSOR.ATTN_OUT: (
+                "vision_model.encoder.layers.{bid}.self_attn.out_proj",
+            ),
+            MODEL_TENSOR.ATTN_NORM: (
+                "vision_model.encoder.layers.{bid}.layer_norm1",
+            ),
+            MODEL_TENSOR.ATTN_NORM_2: (
+                "vision_model.encoder.layers.{bid}.layer_norm2",
+            ),
+            MODEL_TENSOR.FFN_UP: (
+                "vision_model.encoder.layers.{bid}.mlp.fc1",
+            ),
+            MODEL_TENSOR.FFN_DOWN: (
+                "vision_model.encoder.layers.{bid}.mlp.fc2",
             ),
         },
     }
