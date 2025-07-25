@@ -405,36 +405,162 @@ def main():
             print()
         
         if image_results:
-            image_results.sort(key=lambda x: extract_number_from_format(x['format']))
-            print("🖼️  IMAGE EMBEDDING TESTS:")
-            print("-" * 100)
-            print(f"{'Test Name':<25} {'Cos Sim':<12} {'L2 Dist':<12} {'Norm Rel Err':<12} {'Status':<15}")
-            print("-" * 100)
+            # 按尺寸分类图像测试结果 - 通用方法
+            import glob
+            from PIL import Image
+            
+            # 自动发现测试图片并建立映射
+            def build_image_mapping():
+                """通用地构建图片索引映射，自动从文件系统获取图片信息"""
+                mapping = {}
+                test_img_dir = "/root/tmp/llama.cpp/test_images"
+                
+                if os.path.exists(test_img_dir):
+                    # 按文件名排序，确保与测试脚本的处理顺序一致
+                    image_files = sorted(glob.glob(os.path.join(test_img_dir, "*.{png,jpg,jpeg}")))
+                    # 处理通配符展开失败的情况
+                    if not image_files:
+                        for ext in ['png', 'jpg', 'jpeg']:
+                            image_files.extend(sorted(glob.glob(os.path.join(test_img_dir, f"*.{ext}"))))
+                    
+                    for index, img_path in enumerate(image_files):
+                        if os.path.isfile(img_path):
+                            filename = os.path.basename(img_path)
+                            
+                            try:
+                                # 使用PIL获取实际图片尺寸
+                                with Image.open(img_path) as img:
+                                    width, height = img.size
+                                    size_str = f"{width}x{height}"
+                                    
+                                mapping[index] = (filename, size_str)
+                            except Exception as e:
+                                print(f"Warning: Cannot read image {img_path}: {e}")
+                                # 尝试从文件名推断尺寸
+                                size_match = re.search(r'(\d+)x(\d+)', filename)
+                                if size_match:
+                                    size_str = f"{size_match.group(1)}x{size_match.group(2)}"
+                                else:
+                                    size_str = "unknown"
+                                mapping[index] = (filename, size_str)
+                
+                return mapping
+            
+            # 构建动态图片映射
+            image_index_mapping = build_image_mapping()
+            
+            # 为每个结果添加文件名和尺寸信息
+            for result in image_results:
+                # 从format中提取索引，如 png_0 -> 0, jpeg_14 -> 14
+                format_parts = result['format'].split('_')
+                if len(format_parts) >= 2 and format_parts[1].isdigit():
+                    index = int(format_parts[1])
+                    if index in image_index_mapping:
+                        filename, size_str = image_index_mapping[index]
+                        result['filename'] = filename
+                        result['size_str'] = size_str
+                        # 计算像素数用于排序
+                        if 'x' in size_str and size_str != "unknown":
+                            try:
+                                w, h = map(int, size_str.split('x'))
+                                result['pixel_count'] = w * h
+                            except ValueError:
+                                result['pixel_count'] = 0
+                        else:
+                            result['pixel_count'] = 0
+                    else:
+                        result['filename'] = f"unknown_{index}"
+                        result['size_str'] = "unknown"
+                        result['pixel_count'] = 0
+                else:
+                    result['filename'] = result['format']
+                    result['size_str'] = "unknown"
+                    result['pixel_count'] = 0
+
+            # 按尺寸分组
+            size_groups = {}
+            for result in image_results:
+                size_str = result.get('size_str', 'unknown')
+                if size_str not in size_groups:
+                    size_groups[size_str] = []
+                size_groups[size_str].append(result)
+            
+            # 按像素数排序尺寸组
+            sorted_sizes = sorted(size_groups.keys(), key=lambda x: 
+                                int(x.split('x')[0]) * int(x.split('x')[1]) if 'x' in x and x != 'unknown' else 0)
+            
+            print("🖼️  IMAGE EMBEDDING TESTS (按尺寸分类):")
+            print("-" * 120)
+            print(f"{'Image File Name':<30} {'Size':<12} {'Format':<8} {'Cos Sim':<12} {'L2 Dist':<12} {'Norm Rel Err':<12} {'Status':<15}")
+            print("-" * 120)
             
             image_excellent = image_good = image_poor = image_nan = 0
-            for result in image_results:
-                test_name = f"{result['format']}_{result['directory']}"[:24]
-                cos_sim = result['cos_sim']
-                l2_dist = result['l2_dist']
-                norm_rel_err = result['norm_rel_err']
-                
-                if np.isnan(cos_sim):
-                    status = "❌ NaN"
-                    image_nan += 1
-                elif cos_sim >= 0.99:
-                    status = "✅ Excellent"
-                    image_excellent += 1
-                elif cos_sim >= 0.95:
-                    status = "🟡 Good"
-                    image_good += 1
-                else:
-                    status = "❌ Poor"
-                    image_poor += 1
-                
-                print(f"{test_name:<25} {cos_sim:<12.8f} {l2_dist:<12.6f} {norm_rel_err:<12.4f} {status:<15}")
             
-            print("-" * 100)
+            for size_str in sorted_sizes:
+                # 显示尺寸分组标题
+                print(f"\n📏 {size_str} 尺寸图片:")
+                print("-" * 60)
+                
+                # 在每个尺寸组内按格式排序 (png, jpg, jpeg)
+                def get_format_priority(result):
+                    filename = result.get('filename', '').lower()
+                    if filename.endswith('.png'):
+                        return 0
+                    elif filename.endswith('.jpg'):
+                        return 1
+                    elif filename.endswith('.jpeg'):
+                        return 2
+                    else:
+                        return 3
+                
+                size_results = sorted(size_groups[size_str], key=get_format_priority)
+                
+                for result in size_results:
+                    # 自动从文件名提取格式信息
+                    filename = result.get('filename', result['format'])
+                    file_ext = filename.split('.')[-1].lower() if '.' in filename else 'unknown'
+                    
+                    # 标准化格式显示
+                    if file_ext == 'png':
+                        img_format = 'PNG'
+                    elif file_ext == 'jpg':
+                        img_format = 'JPG'  
+                    elif file_ext == 'jpeg':
+                        img_format = 'JPEG'
+                    else:
+                        img_format = file_ext.upper() if file_ext != 'unknown' else 'Unknown'
+                    
+                    test_name = filename[:29]  # 使用文件名作为测试名
+                    cos_sim = result['cos_sim']
+                    l2_dist = result['l2_dist']
+                    norm_rel_err = result['norm_rel_err']
+                    
+                    if np.isnan(cos_sim):
+                        status = "❌ NaN"
+                        image_nan += 1
+                    elif cos_sim >= 0.99:
+                        status = "✅ Excellent"
+                        image_excellent += 1
+                    elif cos_sim >= 0.95:
+                        status = "🟡 Good"
+                        image_good += 1
+                    else:
+                        status = "❌ Poor"
+                        image_poor += 1
+                    
+                    print(f"{test_name:<30} {size_str:<12} {img_format:<8} {cos_sim:<12.8f} {l2_dist:<12.6f} {norm_rel_err:<12.4f} {status:<15}")
+            
+            print("\n" + "-" * 120)
             print(f"Image Tests Summary: ✅ {image_excellent} excellent, 🟡 {image_good} good, ❌ {image_poor} poor, ❌ {image_nan} NaN")
+            
+            # 尺寸性能分析
+            print(f"\n📊 尺寸性能分析:")
+            for size_str in sorted_sizes:
+                size_results = size_groups[size_str]
+                size_excellent = sum(1 for r in size_results if not np.isnan(r['cos_sim']) and r['cos_sim'] >= 0.99)
+                size_total = len(size_results)
+                accuracy_rate = size_excellent / size_total * 100 if size_total > 0 else 0
+                print(f"  {size_str:<12}: {size_excellent}/{size_total} excellent ({accuracy_rate:.1f}%)")
             print()
         
         # 重新计算总体统计

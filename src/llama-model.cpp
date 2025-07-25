@@ -6162,10 +6162,7 @@ struct llm_build_cliptext : public llm_graph_context {
         for (int il = 0; il < n_layer; ++il) {
 
             ggml_tensor * cur = inpL;
-            // norm1
-            // [n_embd, k] * [n_embd, 1] cannot pass assert
-            // [n_embd, k] * repeat([n_embd, 1] => [n_embd, k]) yes
-            // norm =>GGML_TYPE_F32
+           
             cur = build_norm(cur, ggml_repeat(ctx0, model.layers[il].attn_norm, cur), ggml_repeat(ctx0, model.layers[il].attn_norm_b, cur), LLM_NORM, il);
 
             // self-attention
@@ -6173,31 +6170,16 @@ struct llm_build_cliptext : public llm_graph_context {
             cb(Qcur, "Qcur_origin", il);
             Qcur = ggml_scale_inplace(ctx0, Qcur, 1.0f / sqrt((float)n_embd_head));
             Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head, n_tokens);
-            //64, 12, 2, 1
-            //Qcur = ggml_cont(ctx0, ggml_permute(ctx0, Qcur, 0, 2, 1, 3));
+           
             cb(Qcur, "Qcur", il);
 
             ggml_tensor * Kcur = ggml_add(ctx0, build_lora_mm(model.layers[il].wk, cur), model.layers[il].bk);
             Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head, n_tokens);
-            //Kcur = ggml_cont(ctx0, ggml_permute(ctx0, Kcur, 0, 2, 1, 3));
             cb(Kcur, "Kcur", il);
 
             ggml_tensor * Vcur = ggml_add(ctx0, build_lora_mm(model.layers[il].wv, cur), model.layers[il].bv);
-            //Vcur = ggml_reshape_4d(ctx0, Vcur, n_head, n_embd_head, n_tokens, 1);
-            //cb(Vcur, "Vcur", il);
-            //Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head,    n_tokens);
-            //Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
-            //Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
-            bool debug = true;
-            if(!debug){
-                Vcur = ggml_cont(ctx0, ggml_permute(ctx0, Vcur, 0, 2, 1, 3));
-            } else {
-                //Vcur = ggml_cont(ctx0, ggml_permute(ctx0, Vcur, 1, 2, 0, 3));
-                //V = ggml_cont(ctx0, ggml_permute(ctx0, V, 3, 1, 2, 0));
-                //cb(Vcur, "Vcur-contted", il);
-                Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head,  n_head,n_tokens );
-            }
-
+                     
+            Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head,  n_head,n_tokens );
             cur = build_attn(inp_attn, gf,
                     model.layers[il].wo, model.layers[il].bo,
                     Qcur, Kcur, Vcur, nullptr, nullptr, 1.0, il);
@@ -6226,7 +6208,6 @@ struct llm_build_cliptext : public llm_graph_context {
             // input for next layer
             inpL = cur;
         }
-        printf("n_tokens: %ld\n", inpL->ne[1]);
         //cur = inpL;
         const int64_t n_embd   = inpL->ne[0];
         const int64_t n_tokens = inpL->ne[1];
@@ -6239,22 +6220,8 @@ struct llm_build_cliptext : public llm_graph_context {
         cb(cur, "result_embd", -1);
         
         res->t_embd = cur;
-        printf("res->t_embd: %s  shape: %ld %ld %ld %ld %d\n", res->t_embd->name, res->t_embd->ne[0], res->t_embd->ne[1], res->t_embd->ne[2], res->t_embd->ne[3], res->t_embd->type);
-
         ggml_build_forward_expand(gf, cur);
-        
-        printf("gf nodes : %d\n", ggml_graph_n_nodes(gf));
-
-
-        /*cur = inpL;
-        cur = ggml_mul_mat(ctx0, model.projection, cur);
-        // cur = ggml_mul_mat(ctx0, inpl);
-
-        cb(cur, "result_embd", -1);
-        res->t_embd = cur;
-
-        ggml_build_forward_expand(gf, cur);*/
-
+    
     }
 };
 
@@ -6263,7 +6230,6 @@ struct llm_build_clipvision : public llm_graph_context {
         ggml_tensor * cur = nullptr;
         const int64_t n_embd_head = hparams.n_hidden_size / n_head;
         int num_position = (params.hparams.n_image_size / params.hparams.n_image_patch_size) * (params.hparams.n_image_size / params.hparams.n_image_patch_size) + 1;
-        printf("enter llm_graph_context\n");
         auto inp = std::make_unique<llm_graph_input_embd>();
         inp->embd = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, hparams.n_image_size, hparams.n_image_size, 3);
         ggml_set_input(inp->embd);
@@ -6271,10 +6237,7 @@ struct llm_build_clipvision : public llm_graph_context {
         res->add_input(std::move(inp));
         cb(input_embeds, "input_embeds", -1);
         
-        printf("params.hparams.n_image_patch_size: %d\n", params.hparams.n_image_patch_size);
-        printf("params.hparams.n_image_size: %d\n", params.hparams.n_image_size);
-        printf("model.tok_embd: %s %ld %ld %ld %ld %d\n", model.tok_embd->name, model.tok_embd->ne[0], model.tok_embd->ne[1], model.tok_embd->ne[2], model.tok_embd->ne[3], model.tok_embd->type);
-        printf("input_embeds: %s %ld %ld %ld %ld %d\n", input_embeds->name, input_embeds->ne[0], input_embeds->ne[1], input_embeds->ne[2], input_embeds->ne[3], input_embeds->type);
+       
         ggml_tensor * patch_embeds = ggml_conv_2d(ctx0, model.tok_embd, input_embeds, params.hparams.n_image_patch_size,
                                                   params.hparams.n_image_patch_size, 0, 0, 1, 1);
         cb(patch_embeds, "patch_embeds", -1);
@@ -6293,7 +6256,6 @@ struct llm_build_clipvision : public llm_graph_context {
         ggml_tensor * inpL = ggml_concat(ctx0, class_embeds, patch_embeds, 1);
         cb(inpL, "concat_embeds", -1);
         // add position embeddings
-        // ggml_tensor * pos_ids = build_inp_pos();
 
         auto pos_ids_ptr = std::make_unique<llm_graph_input_pos>(n_pos_per_embd());
         auto &pos_ids = pos_ids_ptr->pos;
@@ -6345,45 +6307,28 @@ struct llm_build_clipvision : public llm_graph_context {
                 struct ggml_tensor * V =
                     ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].bv, cur), ggml_mul_mat(ctx0, model.layers[il].wv, cur));
                 V = ggml_reshape_4d(ctx0, V, n_embd_head, n_head, num_position, 1);
-                bool debug = true;
-                if(!debug){
-                    V = ggml_cont(ctx0, ggml_permute(ctx0, V, 0, 2, 1, 3));
-                } else {
-                    cb(V, "origin-Vcur-contted", il);
-                    V = ggml_cont(ctx0, ggml_permute(ctx0, V, 1, 2, 0, 3));
-                    //V = ggml_cont(ctx0, ggml_permute(ctx0, V, 3, 1, 2, 0));
-                    cb(V, "Vcur-contted", il);
-                    V = ggml_reshape_3d(ctx0, V, num_position, n_embd_head, n_head);
-                }
+              
+                cb(V, "origin-Vcur-contted", il);
+                V = ggml_cont(ctx0, ggml_permute(ctx0, V, 1, 2, 0, 3));
+                cb(V, "Vcur-contted", il);
+                V = ggml_reshape_3d(ctx0, V, num_position, n_embd_head, n_head);
+                
                 
                 cb(V, "Vcur-node", il);
-                printf("Q: %s %ld %ld %ld %ld %d\n", Q->name, Q->ne[0], Q->ne[1], Q->ne[2], Q->ne[3], Q->type);
-                printf("K: %s %ld %ld %ld %ld %d\n", K->name, K->ne[0], K->ne[1], K->ne[2], K->ne[3], K->type);
-                printf("V: %s %ld %ld %ld %ld %d\n", V->name, V->ne[0], V->ne[1], V->ne[2], V->ne[3], V->type);
-
-                
                 struct ggml_tensor * KQ = ggml_mul_mat(ctx0, K, Q);
                 cb(KQ, "KQ-aftermul", il);
-                printf("KQ: %s %ld %ld %ld %ld %d\n", KQ->name, KQ->ne[0], KQ->ne[1], KQ->ne[2], KQ->ne[3], KQ->type);
                 KQ = ggml_soft_max_inplace(ctx0, KQ);
                 cb(KQ, "Softmaxed_KQ", il);
-                printf("before ggml_mul_mat \n");
-                printf("KQ: %s %ld %ld %ld %ld %d\n", KQ->name, KQ->ne[0], KQ->ne[1], KQ->ne[2], KQ->ne[3], KQ->type);
-                printf("V: %s %ld %ld %ld %ld %d\n", V->name, V->ne[0], V->ne[1], V->ne[2], V->ne[3], V->type);
+                
                 struct ggml_tensor * KQV = ggml_mul_mat(ctx0, V, KQ);
                 
-                printf("KQV1: %s %ld %ld %ld %ld %d\n", KQV->name, KQV->ne[0], KQV->ne[1], KQV->ne[2], KQV->ne[3], KQV->type);
                 KQV = ggml_reshape_4d(ctx0, KQV, n_embd_head, num_position, n_head, 1);
-                printf("KQV2: %s %ld %ld %ld %ld %d\n", KQV->name, KQV->ne[0], KQV->ne[1], KQV->ne[2], KQV->ne[3], KQV->type);
                 KQV = ggml_cont(ctx0, ggml_permute(ctx0, KQV, 0, 2, 1, 3));
-                printf("KQV3: %s %ld %ld %ld %ld %d\n", KQV->name, KQV->ne[0], KQV->ne[1], KQV->ne[2], KQV->ne[3], KQV->type);
 
                 cur = ggml_cpy(ctx0, KQV, ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, n_embd_head * n_head, num_position, 1));
-                printf("KQV4: %s %ld %ld %ld %ld %d\n", cur->name, cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3], cur->type);
             }
             cur = ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].bo, cur), ggml_mul_mat(ctx0, model.layers[il].wo, cur));
             cb(cur, "kqv_out", il);
-            printf("kqv_out: %s %ld %ld %ld %ld %d\n", cur->name, cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3], cur->type);
 
             ggml_tensor * ffn_inp = ggml_add(ctx0, cur, inpL);
             cb(ffn_inp, "ffn_inp", il);
@@ -6403,7 +6348,6 @@ struct llm_build_clipvision : public llm_graph_context {
             // add
             cur = ggml_add(ctx0, cur, ffn_inp);
             cb(cur, "l_out", il);
-            // input for next layer
             inpL = cur;
         }
         cur = ggml_view_2d(ctx0, inpL, inpL->ne[0], 1, inpL->ne[0], 0);
@@ -6414,10 +6358,7 @@ struct llm_build_clipvision : public llm_graph_context {
         
         res->t_embd = cur;
 
-        ggml_build_forward_expand(gf, cur);
-        
-        printf("gf nodes : %d\n", ggml_graph_n_nodes(gf));
-        
+        ggml_build_forward_expand(gf, cur);        
     }
 };
 

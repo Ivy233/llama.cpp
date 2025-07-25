@@ -2828,134 +2828,6 @@ struct ggml_cplan ggml_graph_plan(
     return cplan;
 }
 
-// 添加调试打印函数
-static void debug_print_tensor_values(struct ggml_tensor * tensor, const char * prefix, const char * node_name) {
-    if (!tensor || !tensor->data) {
-        printf("DEBUG: %s %s - tensor is null or data is null\n", prefix, node_name);
-        return;
-    }
-    
-    printf("DEBUG: %s %s - shape: [%ld, %ld, %ld, %ld], type: %d\n", 
-           prefix, node_name, tensor->ne[0], tensor->ne[1], tensor->ne[2], tensor->ne[3], tensor->type);
-    
-    // 检查是否是leaf_12或其他需要详细打印的tensor
-    bool print_all = (strstr(node_name, "leaf_12") != NULL) || 
-                     (strstr(node_name, "mask") != NULL) ||
-                     (strstr(node_name, "kq_mask") != NULL);
-    
-    if (tensor->type == GGML_TYPE_F32) {
-        float* data = (float*)tensor->data;
-        int64_t total_elements = ggml_nelements(tensor);
-        printf("total_elements: %d\n", total_elements);
-        if (print_all) {
-            // 打印所有值
-            printf("DEBUG: %s %s - ALL VALUES:\n", prefix, node_name);
-            for (int64_t i = 0; i < total_elements; i++) {
-                printf("%.2f ", data[i]);
-                if ((i + 1) % tensor->ne[0] == 0) printf("\n");
-            }
-            printf("\n");
-        } else {
-            // 只打印前10个值
-            int print_count = total_elements > 10 ? 10 : (int)total_elements;
-            
-            printf("DEBUG: %s %s - first %d values: ", prefix, node_name, print_count);
-            for (int i = 0; i < print_count; i++) {
-                printf("%.6f ", data[i]);
-            }
-            printf("\n");
-
-            //if (strstr(node_name, "ffn_out_added") != NULL && strstr(node_name, "view") == NULL) {
-            if (strcmp(node_name, "ffn_out_added-0") == 0) {
-                // --- Gemini-generated modification to match Python's memory layout ---
-                printf("\n--- C++: Reversing Transpose to Match Python ---\n");
-                const float * data = (const float *) tensor->data;
-
-                // Define dimensions based on Python's perspective
-                const int64_t B = tensor->ne[2]; // batch_size
-                const int64_t S = tensor->ne[1]; // seq_len
-                const int64_t H = tensor->ne[0]; // hidden_dim  
-                printf("B:%d, S:%d, H:%d\n", B, S, H);
-                // Iterate using Python's logical (B, S, H) order
-                printf("--- Comparing to Python's sequential memory ---\n");
-                for (int64_t b = 0; b < B; ++b) {
-                    for (int64_t s = 0; s < S; ++s) {
-                        for (int64_t h = 0; h < H; ++h) {
-                            // This is the Python linear index, for reference
-                            int64_t python_linear_index = h + s*H + b*S*H;
-
-                            // To find this element in C++'s memory, we use the transposed
-                            // coordinates. The value at Python's (b,s,h) is located
-                            // at C++'s logical coordinate (s,b,h).
-                            int64_t cpp_s = s;
-                            int64_t cpp_b = b;
-                            int64_t cpp_h = h;
-
-                            // Calculate the physical index in C++ memory, which is laid out
-                            // as (seq_len, batch_size, hidden_dim)
-                            int64_t cpp_physical_index = cpp_h + cpp_b*H + cpp_s*B*H;
-
-                            if (python_linear_index < 300) { // Limit print for brevity
-                                //printf("cpp_h:%d, cpp_b:%d, cpp_s :%d, Py_Idx[%lld] -> Cpp_Phys_Idx[%lld]: %.6f\n", cpp_h, cpp_b, cpp_s,
-                                //       python_linear_index, cpp_physical_index, data[cpp_physical_index]);
-                            }
-                        }
-                    }
-                }
-                
-                // Iterate through second dimension and print first 10 elements of first dimension
-                printf("\n--- Iterating through second dimension (seq_len=%lld) ---\n", S);
-                for (int64_t s = 0; s < S; ++s) {
-                    printf("Sequence position %lld:\n", s);
-                    // Fixed batch index (0) since B=1
-                    int64_t b = 0;
-                    // Print first 10 elements of hidden dimension
-                    for (int64_t h = 0; h < 10 && h < H; ++h) {
-                        // Calculate physical index using same access pattern
-                        int64_t cpp_physical_index = h + b*H + s*B*H;
-                        printf("[h=%lld, b=%lld, H=%lld, s=%lld, B=%lld, idx=%lld]: %.6f\n", h, b, H, s, B, cpp_physical_index, data[cpp_physical_index]);
-                    }
-                    printf("\n");
-                }
-                // --- End of modification ---
-            }
-        }
-        print_all = false;
-        // 计算数值范围
-        if (total_elements > 0) {
-            float min_val = data[0], max_val = data[0];
-            for (int64_t i = 1; i < total_elements; i++) {
-                if (data[i] < min_val) min_val = data[i];
-                if (data[i] > max_val) max_val = data[i];
-            }
-            printf("DEBUG: %s %s - range: [%.6f, %.6f], total_elements: %lld\n", 
-                   prefix, node_name, min_val, max_val, (long long)total_elements);
-        }
-    } else if (tensor->type == GGML_TYPE_F16) {
-        ggml_fp16_t* data = (ggml_fp16_t*)tensor->data;
-        int64_t total_elements = ggml_nelements(tensor);
-        int print_count = total_elements > 10 ? 10 : (int)total_elements;
-        printf("total_elements: %d\n", total_elements);
-        printf("DEBUG: %s %s - first %d values (F16): ", prefix, node_name, print_count);
-        for (int i = 0; i < print_count; i++) {
-            printf("%.6f ", ggml_fp16_to_fp32(data[i]));
-        }
-        printf("\n");
-    } else if (tensor->type == GGML_TYPE_I32) {
-        int32_t* data = (int32_t*)tensor->data;
-        int64_t total_elements = ggml_nelements(tensor);
-        int print_count = total_elements > 20 ? 20 : (int)total_elements;
-        printf("total_elements: %d\n", total_elements);
-        printf("DEBUG: %s %s - first %d values (I32): ", prefix, node_name, print_count);
-        for (int i = 0; i < print_count; i++) {
-            printf("%d ", data[i]);
-        }
-        printf("\n");
-    } else {
-        printf("DEBUG: %s %s - unsupported tensor type: %d\n", prefix, node_name, tensor->type);
-    }
-    fflush(stdout);
-}
 
 static thread_ret_t ggml_graph_compute_thread(void * data) {
     struct ggml_compute_state * state = (struct ggml_compute_state *) data;
@@ -2978,35 +2850,12 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
     for (int node_n = 0; node_n < cgraph->n_nodes && atomic_load_explicit(&tp->abort, memory_order_relaxed) != node_n; node_n++) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
         
-        // 打印节点名字和基本信息
-        if(node_n < 1){
-            printf("=== Node %d: %s ===\n", node_n, node->name ? node->name : "unnamed");
-            printf("Node operation: %s\n", ggml_op_name(node->op));
-            
-            // 打印输入tensor的值
-            if (node->src[0] != NULL) {
-                debug_print_tensor_values(node->src[0], "INPUT[0]", node->src[0]->name ? node->src[0]->name : "unnamed");
-            }
-            if (node->src[1] != NULL) {
-                debug_print_tensor_values(node->src[1], "INPUT[1]", node->src[1]->name ? node->src[1]->name : "unnamed");
-            }
-            if (node->src[2] != NULL) {
-                debug_print_tensor_values(node->src[2], "INPUT[2]", node->src[2]->name ? node->src[2]->name : "unnamed");
-            }
-            
-            fflush(stdout); 
-        }
-        
+        if (node->op == GGML_OP_NONE) {
+            continue; // skip empty nodes
+        }        
         // 执行前向传播
         ggml_compute_forward(&params, node);
         
-        // 打印输出tensor的值
-        if(node_n < 1){
-            debug_print_tensor_values(node, "OUTPUT", node->name ? node->name : "unnamed");
-            printf("=== End Node %d ===\n\n", node_n);
-            fflush(stdout);
-        }
-
         if (state->ith == 0 && cplan->abort_callback &&
                 cplan->abort_callback(cplan->abort_callback_data)) {
             atomic_store_explicit(&tp->abort, node_n + 1, memory_order_relaxed);

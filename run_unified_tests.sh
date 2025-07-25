@@ -117,7 +117,7 @@ run_text_tests() {
     mkdir -p "$OUT_DIR"
     echo "Text test output directory: $OUT_DIR"
     
-    declare -a PROMPTS=(
+    declare -a TEXT_PROMPTS=(
       # Basic tests
       "hello world"
       "  hello   world  "
@@ -187,17 +187,20 @@ run_text_tests() {
       "HTTP HTTPS REST API JSON XML"
       "machine learning AI transformer"
       "const fn = () => { return 42; }"
+
+      #"帮我找找文件名包含"resolution"且日期在元宵节之前的文件。还有啊，我也需要那种内容包含"创新无限"并且大小比"/financial_statement_2023.xlsx"小的文件。"
+      #"请获取英国邮编 WC2N 5DU 和 EC1A 1BB 的地址。另外，在法国查找一个名为"马赛"的市镇。"
   )
   
     # Define text test cases
-    declare -a TEXT_PROMPTS=(
-        "hello world"
-        "你好，世界"
-        "CLIP: Contrastive Language-Image Pre-Training"
-        "machine learning AI transformer"
-        "Café naïve résumé"
-        "🚀🌟💻🎯"
-    )
+    #declare -a TEXT_PROMPTS=(
+        #"hello world"
+        #"你好，世界"
+        #"CLIP: Contrastive Language-Image Pre-Training"
+        #"machine learning AI transformer"
+        #"Café naïve résumé"
+        #"🚀🌟💻🎯"
+    #)
         
     # Loop through each text prompt
     for i in "${!TEXT_PROMPTS[@]}"; do
@@ -252,38 +255,39 @@ run_image_tests() {
     mkdir -p "$OUT_DIR"
     echo "Image test output directory: $OUT_DIR"
     
-    # Define image test cases - find existing image files
+    # Define image test cases using test_images directory
     declare -a IMAGE_PATHS=()
     
-    # Add known test images
-    if [ -f "/root/BGE-VL-result/sample.png" ]; then
-        IMAGE_PATHS+=("/root/BGE-VL-result/sample.png")
-    fi
-    if [ -f "/root/BGE-VL-result/preprocessed_image.jpg" ]; then
-        IMAGE_PATHS+=("/root/BGE-VL-result/preprocessed_image.jpg")
-    fi
-    if [ -f "/root/tmp/llama.cpp/tools/mtmd/test-1.jpeg" ]; then
-        IMAGE_PATHS+=("/root/tmp/llama.cpp/tools/mtmd/test-1.jpeg")
-    fi
-    
-    # If no images found, use media directory images
-    if [ ${#IMAGE_PATHS[@]} -eq 0 ]; then
-        echo "No dedicated test images found, using media directory images..."
-        IMAGE_PATHS+=(
-            "/root/tmp/llama.cpp/media/llama0-logo.png"
-            "/root/tmp/llama.cpp/media/matmul.png"
-        )
+    # Use test_images directory with different sizes and formats
+    TEST_IMG_DIR="/root/tmp/llama.cpp/test_images"
+    if [ -d "$TEST_IMG_DIR" ]; then
+        # Add images of different sizes for comprehensive testing
+        for img in "$TEST_IMG_DIR"/*.{png,jpg,jpeg}; do
+            if [ -f "$img" ] && [ -s "$img" ]; then  # Check file exists and is not empty
+                IMAGE_PATHS+=("$img")
+            fi
+        done
     fi
     
+    # Fallback to original test images if test_images directory is empty
     if [ ${#IMAGE_PATHS[@]} -eq 0 ]; then
-        echo "❌ No available test images found, skipping image tests."
+        if [ -f "/root/BGE-VL-result/sample.png" ]; then
+            IMAGE_PATHS+=("/root/BGE-VL-result/sample.png")
+        fi
+        if [ -f "/root/BGE-VL-result/preprocessed_image.jpg" ]; then
+            IMAGE_PATHS+=("/root/BGE-VL-result/preprocessed_image.jpg")
+        fi
+        if [ -f "/root/tmp/llama.cpp/tools/mtmd/test-1.jpeg" ]; then
+            IMAGE_PATHS+=("/root/tmp/llama.cpp/tools/mtmd/test-1.jpeg")
+        fi
+    fi
+    
+    if [ ${#IMAGE_PATHS[@]} -eq 0 ]; then
+        echo "❌ No test images found, skipping image tests"
         return 1
     fi
     
-    echo "Found ${#IMAGE_PATHS[@]} test images"
-    for img in "${IMAGE_PATHS[@]}"; do
-        echo "  - $img"
-    done
+    echo "Found ${#IMAGE_PATHS[@]} test images with different sizes and formats"
     
     # Loop through each image
     for i in "${!IMAGE_PATHS[@]}"; do

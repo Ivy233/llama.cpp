@@ -12,8 +12,6 @@
 void llm_graph_input_embd::set_input(const llama_ubatch * ubatch) {
     if (ubatch->token) {
         const int64_t n_tokens = ubatch->n_tokens;
-        printf(" llm_graph_input_embd::set_input n_tokens: %ld\n", n_tokens);
-        printf(" llm_graph_input_embd::set_input ggml_element_size(tokens): %ld\n", ggml_element_size(tokens));
         ggml_backend_tensor_set(tokens, ubatch->token, 0, n_tokens*ggml_element_size(tokens));
     }
 
@@ -30,38 +28,13 @@ void llm_graph_input_embd::set_input(const llama_ubatch * ubatch) {
         
         const int64_t n_tokens = ubatch->n_tokens;
         
-        // 添加详细调试信息
-        printf("=== llm_graph_input_embd::set_input 调试信息（修复版）===\n");
-        printf("ubatch->embd 指针: %p\n", ubatch->embd);
-        printf("embd 张量指针: %p\n", embd);
-        printf("embd 张量维度: [%ld, %ld, %ld, %ld]\n", embd->ne[0], embd->ne[1], embd->ne[2], embd->ne[3]);
-        printf("计算的总元素数: %ld\n", total_elements);
-        printf("n_tokens: %ld\n", n_tokens);
-        printf("传输大小: %ld bytes\n", total_elements*ggml_element_size(embd));
-        
-        // 打印源数据前10个值
-        printf("源数据 ubatch->embd 前10个值: ");
-        for (int i = 0; i < 10 && i < total_elements; ++i) {
-            printf("%.6f ", ubatch->embd[i]);
-        }
-        printf("\n");
         // 传输完整的张量数据
         ggml_backend_tensor_set(embd, ubatch->embd, 0, total_elements*ggml_element_size(embd));
         
-        printf("数据传输完成（完整张量）\n");
-        printf("=================================================\n");
     }
 }
 
 void llm_graph_input_pos::set_input(const llama_ubatch * ubatch) {
-    printf("ubatch->pos: %d\n", ubatch->pos);
-    printf("pos: %d\n", pos);
-    printf("ubatch->n_tokens: %d\n", ubatch->n_tokens);
-    printf("ubatch->token: %d\n", ubatch->token);
-    printf("n_pos_per_embd: %d\n", n_pos_per_embd);
-    for(int i = 0; i < 10; i++) {
-        printf("ubatch->pos[%d]: %d\n", i, ubatch->pos[i]);
-    }
     if (ubatch->pos && pos) {
         const int64_t n_tokens = ubatch->n_tokens;
 
@@ -311,13 +284,6 @@ void llm_graph_input_cross_embd::set_input(const llama_ubatch * ubatch) {
 }
 
 void llm_graph_input_attn_no_cache::set_input(const llama_ubatch * ubatch) {
-    printf("kq_mask: %p\n", kq_mask);
-    //printf("kq_mask shape: %d, %d, %d\n", kq_mask->ne[0], kq_mask->ne[1], kq_mask->ne[2]);
-    printf("cparams.causal_attn: %d\n", cparams.causal_attn);
-    printf("n_seqs: %d\n", ubatch->n_seqs);
-    printf("n_seq_tokens: %d\n", ubatch->n_seq_tokens);
-    printf("n_tokens: %d\n", ubatch->n_tokens);
-
     if (kq_mask) {
         if (cparams.causal_attn) {
             const int64_t n_kv         = ubatch->n_tokens;
@@ -895,9 +861,7 @@ ggml_tensor * llm_graph_context::build_inp_embd(ggml_tensor * tok_embd) const {
     auto inp = std::make_unique<llm_graph_input_embd>();
 
     ggml_tensor * cur = nullptr;
-    printf("batch.n_tokens: %d\n", ubatch.n_tokens);
     if (ubatch.token) {
-        printf("ubatch.n_tokens: %d\n", ubatch.n_tokens);
         inp->tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, ubatch.n_tokens);
         cb(inp->tokens, "inp_tokens", -1);
         ggml_set_input(inp->tokens);
@@ -1121,9 +1085,6 @@ ggml_tensor * llm_graph_context::build_attn_mha(
          ggml_tensor * v_mla,
              float     kq_scale) const {
     const bool v_trans = v->nb[1] > v->nb[2];
-    //printf("v->nb[1]: %d, v->nb[2]: %d\n", v->nb[1], v->nb[2]);
-    //printf("v_trans: %d\n", v_trans);
-    //printf("enter build_attn_mha v shape: %d, %d, %d, %d\n", v->ne[0], v->ne[1], v->ne[2], v->ne[3]);
     q = ggml_permute(ctx0, q, 0, 2, 1, 3);
     k = ggml_permute(ctx0, k, 0, 2, 1, 3);
     v = ggml_permute(ctx0, v, 0, 2, 1, 3);
@@ -1264,8 +1225,7 @@ ggml_tensor * llm_graph_context::build_attn(
             float     kq_scale,
             int       il) const {
     GGML_UNUSED(n_tokens);
-    printf("enter llm_graph_input_attn_no_cache build_attn, v_cur shape: %d, %d, %d\n", v_cur->ne[0], v_cur->ne[1], v_cur->ne[2]);
-    printf("enter llm_graph_input_attn_no_cache build_attn, v_cur nb[1]: %d, nb[2]: %d\n", v_cur->nb[1], v_cur->nb[2]);
+    
     // these nodes are added to the graph together so that they are not reordered
     // by doing so, the number of splits in the graph is reduced
     ggml_build_forward_expand(gf, q_cur);
@@ -1331,7 +1291,6 @@ ggml_tensor * llm_graph_context::build_attn(
             float     kq_scale,
             int       il) const {
     
-    printf("enter build_attn, v_cur shape: %d, %d, %d\n", v_cur->ne[0], v_cur->ne[1], v_cur->ne[2]);
     // these nodes are added to the graph together so that they are not reordered
     // by doing so, the number of splits in the graph is reduced
     ggml_build_forward_expand(gf, q_cur);
